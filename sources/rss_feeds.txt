@@ -1,0 +1,2 @@
+https://lilianweng.github.io/index.xml
+https://huggingface.co/blog/feed.xml

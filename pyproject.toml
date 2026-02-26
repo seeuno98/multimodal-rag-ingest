@@ -1,0 +1,38 @@
+[project]
+name = "multimodal-rag-ingest"
+version = "0.1.0"
+description = "API-first multimodal RAG ingestion and retrieval pipeline"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "openai>=1.40.0",
+  "faiss-cpu>=1.8.0",
+  "pymupdf>=1.24.0",
+  "yt-dlp>=2025.1.0",
+  "feedparser>=6.0.11",
+  "trafilatura>=1.10.0",
+  "python-dotenv>=1.0.1",
+  "requests>=2.32.0",
+  "numpy>=1.26.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.6.0",
+  "pytest>=7.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

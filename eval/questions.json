@@ -1,0 +1,10 @@
+[
+  {
+    "question": "What is retrieval-augmented generation?",
+    "relevant_doc_ids": []
+  },
+  {
+    "question": "How do vector databases help in RAG systems?",
+    "relevant_doc_ids": []
+  }
+]
