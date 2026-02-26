@@ -382,3 +382,23 @@ The `eval` command prints:
 
 - YouTube ingestion first attempts captions/subtitles, then falls back to Whisper transcription when API key is available.
 - Network/API failures are logged and skipped without crashing the whole run.
+
+## Testing
+
+### Run unit tests
+
+```bash
+make test
+```
+
+### Run end-to-end smoke test
+
+```bash
+make smoke
+```
+
+### Clean generated artifacts
+
+```bash
+make clean
+```

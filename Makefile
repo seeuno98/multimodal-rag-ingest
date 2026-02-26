@@ -1,9 +1,13 @@
-PYTHON ?= python
+PYTHON ?= .venv/bin/python
 
-.PHONY: setup ingest normalize index query eval
+.PHONY: setup ingest normalize index query eval test smoke clean
 
 setup:
-	uv sync
+	@if command -v uv >/dev/null 2>&1; then \
+		uv sync --extra dev; \
+	else \
+		$(PYTHON) -m pip install -e ".[dev]"; \
+	fi
 
 ingest:
 	$(PYTHON) -m src.cli ingest arxiv --query "retrieval augmented generation" --max 5
@@ -23,10 +27,10 @@ eval:
 	$(PYTHON) -m src.cli eval --file eval/questions.json
 
 test:
-	pytest -q
+	$(PYTHON) -m pytest -q
 
 smoke:
-	python scripts/smoke_test.py
+	$(PYTHON) scripts/smoke_test.py
 
 clean:
 	rm -rf data/processed/*
