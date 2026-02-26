@@ -21,3 +21,13 @@ query:
 
 eval:
 	$(PYTHON) -m src.cli eval --file eval/questions.json
+
+test:
+	pytest -q
+
+smoke:
+	python scripts/smoke_test.py
+
+clean:
+	rm -rf data/processed/*
+	rm -rf data/index/*
