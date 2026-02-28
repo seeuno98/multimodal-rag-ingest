@@ -360,6 +360,7 @@ make eval
 - Uses retrieved chunks only
 - Includes citations in required format
 - If answer is missing from retrieved context, responds explicitly that it was not found
+- CLI answers display source URLs derived from retrieved chunks, while internal citations are retained for validation
 
 ## Evaluation Format
 
@@ -391,10 +392,28 @@ The `eval` command prints:
 make test
 ```
 
+This is offline.
+
 ### Run end-to-end smoke test
 
 ```bash
 make smoke
+```
+
+This runs normalization and artifact checks. If an index already exists, it may also run the query step and print the answer without rebuilding the index.
+
+### Run paid end-to-end smoke test
+
+```bash
+make smoke_paid
+```
+
+This runs the full end-to-end path, including indexing and query generation, and will incur OpenAI usage.
+
+To guarantee no OpenAI calls, disable query execution explicitly:
+
+```bash
+SMOKE_QUERY=0 make smoke
 ```
 
 ### Clean generated artifacts

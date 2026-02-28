@@ -126,7 +126,8 @@ def main() -> None:
                         "rank": i,
                         "score": round(hit["score"], 4),
                         "doc_id": hit["doc_id"],
-                        "citation": hit.get("metadata", {}).get("citation"),
+                        "citation": hit.get("citation") or hit.get("metadata", {}).get("citation"),
+                        "source_uri": hit.get("source_uri") or hit.get("metadata", {}).get("source_uri"),
                     },
                     ensure_ascii=False,
                 )
