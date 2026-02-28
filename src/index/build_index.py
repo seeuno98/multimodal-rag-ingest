@@ -31,7 +31,7 @@ def build_index(
         raise ValueError("OPENAI_API_KEY is required for embedding and indexing.")
 
     embedder = Embedder(api_key=openai_api_key, model=embed_model)
-    vectors = embedder.embed_texts([chunk["text"] for chunk in chunks])
+    vectors = embedder.embed_texts(chunks)
     store = FaissStore(dim=vectors.shape[1])
     store.add(vectors=vectors, metadata=chunks)
     store.save(index_path=faiss_path, metadata_path=metadata_path)

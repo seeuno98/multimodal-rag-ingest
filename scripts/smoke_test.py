@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -19,21 +20,54 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     docs_path = root / "data/processed/docs.jsonl"
     faiss_path = root / "data/index/faiss.index"
+    smoke_embed = os.getenv("SMOKE_EMBED", "0")
+    smoke_query = os.getenv("SMOKE_QUERY", "1")
 
     try:
-        print("[smoke] Step 1/5: normalize")
+        print("[smoke] Step 1/2: normalize")
         run_step([sys.executable, "-m", "src.cli", "normalize"], root)
 
-        print("[smoke] Step 2/5: validate docs artifact")
+        print("[smoke] Step 2/2: validate docs artifact")
         assert_exists(docs_path, f"Missing required artifact: {docs_path}")
 
-        print("[smoke] Step 3/5: index")
-        run_step([sys.executable, "-m", "src.cli", "index"], root)
+        if smoke_embed == "1":
+            print("[smoke] Step 3/5: index")
+            run_step([sys.executable, "-m", "src.cli", "index"], root)
 
-        print("[smoke] Step 4/5: validate index artifact")
-        assert_exists(faiss_path, f"Missing required artifact: {faiss_path}")
+            print("[smoke] Step 4/5: validate index artifact")
+            assert_exists(faiss_path, f"Missing required artifact: {faiss_path}")
 
-        print("[smoke] Step 5/5: query")
+            print("[smoke] Step 5/5: query")
+            run_step(
+                [
+                    sys.executable,
+                    "-m",
+                    "src.cli",
+                    "query",
+                    "--q",
+                    "What is retrieval augmented generation?",
+                    "--k",
+                    "5",
+                ],
+                root,
+            )
+            print("Smoke test passed")
+            return 0
+
+        if smoke_query != "1":
+            print("Skipping query (SMOKE_QUERY=0).")
+            print("Smoke test passed")
+            return 0
+
+        if not faiss_path.exists():
+            print(
+                "Index not found; skipping query to avoid OpenAI costs. "
+                "Run make smoke_paid to build index."
+            )
+            print("Smoke test passed")
+            return 0
+
+        print("[smoke] Step 3/3: query")
         run_step(
             [
                 sys.executable,

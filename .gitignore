@@ -9,7 +9,7 @@ __pycache__/
 *.log
 *.egg-info/
 
-# Project data artifacts
+# Raw data artifacts
 data/raw/**/downloads/
 data/raw/**/audio/
 data/raw/**/*.pdf
@@ -17,17 +17,21 @@ data/raw/**/*.mp3
 data/raw/**/*.vtt
 data/raw/**/*.json
 data/raw/*.jsonl
-data/index/*.index
-data/index/*.npy
-data/index/*.jsonl
 
-# Keep directories but ignore generated files
-!data/raw/.gitkeep
-!data/processed/.gitkeep
-!data/index/.gitkeep
-
-# Processed outputs
+# Processed artifacts
 data/processed/*.jsonl
 data/processed/*.json
 data/processed/*.parquet
 
+# Index artifacts
+data/index/*.index
+data/index/*.npy
+data/index/*.json
+data/index/*.jsonl
+
+# Embedding cache
+data/index/embeddings_cache*
+
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/index/.gitkeep
