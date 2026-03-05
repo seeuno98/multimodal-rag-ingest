@@ -28,9 +28,13 @@ data/index/*.index
 data/index/*.npy
 data/index/*.json
 data/index/*.jsonl
+data/index/*.joblib
 
 # Embedding cache
 data/index/embeddings_cache*
+
+# Eval artifacts
+data/eval/*.json
 
 !data/raw/.gitkeep
 !data/processed/.gitkeep

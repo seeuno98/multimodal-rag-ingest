@@ -14,6 +14,8 @@ dependencies = [
   "python-dotenv>=1.0.1",
   "requests>=2.32.0",
   "numpy>=1.26.0",
+  "rank-bm25>=0.2.2",
+  "joblib>=1.4.0",
 ]
 
 [project.optional-dependencies]

@@ -314,6 +314,10 @@ make query Q="What is RAG?"
 make eval
 ```
 
+Indexing now builds both:
+- FAISS dense index
+- BM25 lexical index
+
 ## Data Schemas
 
 ### `docs.jsonl`
@@ -361,6 +365,7 @@ make eval
 - Includes citations in required format
 - If answer is missing from retrieved context, responds explicitly that it was not found
 - CLI answers display source URLs derived from retrieved chunks, while internal citations are retained for validation
+- Query uses hybrid retrieval by default when `data/index/bm25.joblib` exists, otherwise it falls back to dense retrieval
 
 ## Evaluation Format
 
@@ -378,6 +383,19 @@ make eval
 The `eval` command prints:
 - `Recall@K`
 - `MRR`
+
+Evaluation compares:
+- dense retrieval
+- bm25 retrieval
+- hybrid retrieval (when BM25 index exists)
+
+Common commands:
+
+```bash
+make index
+python -m src.cli query --q "What is retrieval augmented generation?" --k 5
+python -m src.cli eval --file eval/questions.json
+```
 
 ## Notes
 

@@ -63,6 +63,7 @@ def main() -> None:
     chunks_path = cfg.processed_dir / "chunks.jsonl"
     index_path = cfg.index_dir / "faiss.index"
     metadata_path = cfg.index_dir / "metadata.jsonl"
+    bm25_path = cfg.index_dir / "bm25.joblib"
 
     if args.command == "ingest":
         if args.ingest_type == "arxiv":
@@ -93,6 +94,7 @@ def main() -> None:
             chunks_path=chunks_path,
             faiss_path=index_path,
             metadata_path=metadata_path,
+            bm25_path=bm25_path,
             openai_api_key=cfg.openai_api_key,
             embed_model=cfg.openai_embed_model,
             chunk_max_chars=cfg.chunk_max_chars,
@@ -110,6 +112,7 @@ def main() -> None:
             openai_api_key=cfg.openai_api_key,
             embed_model=cfg.openai_embed_model,
             top_k=top_k,
+            bm25_path=bm25_path,
         )
         answer = generate_grounded_answer(
             question=args.q,
@@ -126,8 +129,11 @@ def main() -> None:
                         "rank": i,
                         "score": round(hit["score"], 4),
                         "doc_id": hit["doc_id"],
+                        "chunk_id": hit.get("chunk_id"),
                         "citation": hit.get("citation") or hit.get("metadata", {}).get("citation"),
                         "source_uri": hit.get("source_uri") or hit.get("metadata", {}).get("source_uri"),
+                        "retrieval": hit.get("retrieval"),
+                        "components": hit.get("components"),
                     },
                     ensure_ascii=False,
                 )
@@ -143,8 +149,10 @@ def main() -> None:
             openai_api_key=cfg.openai_api_key,
             embed_model=cfg.openai_embed_model,
             k=top_k,
+            bm25_path=bm25_path,
+            results_path=Path("data/eval/results.json"),
         )
-        print(json.dumps(report, indent=2))
+        print(report["table"])
         return
 
 

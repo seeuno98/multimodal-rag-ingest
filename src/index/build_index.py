@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from src.index.bm25 import build_bm25_index
 from src.index.chunk import chunk_documents
 from src.index.embed import Embedder
 from src.index.faiss_store import FaissStore
@@ -17,6 +18,7 @@ def build_index(
     chunks_path: Path,
     faiss_path: Path,
     metadata_path: Path,
+    bm25_path: Path,
     openai_api_key: str,
     embed_model: str,
     chunk_max_chars: int,
@@ -35,5 +37,7 @@ def build_index(
     store = FaissStore(dim=vectors.shape[1])
     store.add(vectors=vectors, metadata=chunks)
     store.save(index_path=faiss_path, metadata_path=metadata_path)
+    build_bm25_index(chunks=chunks, out_path=bm25_path)
+    LOGGER.info("Built BM25 index: chunks=%s path=%s", len(chunks), bm25_path)
     LOGGER.info("Indexed %s chunks from %s documents", len(chunks), len(docs))
     return len(docs), len(chunks)
