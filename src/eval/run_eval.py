@@ -6,12 +6,13 @@ from pathlib import Path
 from typing import Any
 
 from src.eval.metrics import mean, recall_at_k, reciprocal_rank
-from src.rag.retrieve import retrieve_chunks
+from src.rag.retrieve import retrieve
 
 LOGGER = logging.getLogger(__name__)
+MODE_ORDER = ["dense", "bm25", "hybrid"]
 
 
-def _metric_targets(row: dict[str, Any], results: list[dict[str, Any]]) -> set[str]:
+def _metric_targets(row: dict[str, Any]) -> set[str]:
     if row.get("relevant_citations"):
         return set(row["relevant_citations"])
     if row.get("relevant_doc_ids"):
@@ -28,12 +29,53 @@ def _result_targets(row: dict[str, Any], results: list[dict[str, Any]]) -> list[
 def _format_table(mode_metrics: dict[str, dict[str, float]]) -> str:
     header = "Mode | Recall@1 | Recall@5 | Recall@10 | MRR"
     lines = [header, "-" * len(header)]
-    for mode, metrics in mode_metrics.items():
+    for mode in MODE_ORDER:
+        if mode not in mode_metrics:
+            continue
+        metrics = mode_metrics[mode]
         lines.append(
-            f"{mode} | {metrics['Recall@1']:.4f} | {metrics['Recall@5']:.4f} | "
-            f"{metrics['Recall@10']:.4f} | {metrics['MRR']:.4f}"
+            f"{mode} | {metrics['recall@1']:.4f} | {metrics['recall@5']:.4f} | "
+            f"{metrics['recall@10']:.4f} | {metrics['mrr']:.4f}"
         )
     return "\n".join(lines)
+
+
+def _evaluate_mode(
+    mode: str,
+    questions: list[dict[str, Any]],
+    index_path: Path,
+    metadata_path: Path,
+    openai_api_key: str,
+    embed_model: str,
+    k: int,
+    bm25_path: Path,
+) -> dict[str, float]:
+    LOGGER.info("Running eval mode: %s", mode)
+    scores = {"recall@1": [], "recall@5": [], "recall@10": [], "mrr": []}
+
+    for row in questions:
+        question = row.get("query") or row.get("question")
+        if not question:
+            continue
+
+        results = retrieve(
+            question=question,
+            index_path=index_path,
+            metadata_path=metadata_path,
+            openai_api_key=openai_api_key,
+            embed_model=embed_model,
+            k=max(10, k),
+            mode=mode,  # type: ignore[arg-type]
+            bm25_path=bm25_path,
+        )
+        targets = _metric_targets(row)
+        retrieved_targets = _result_targets(row, results)
+        scores["recall@1"].append(recall_at_k(targets, retrieved_targets, 1))
+        scores["recall@5"].append(recall_at_k(targets, retrieved_targets, 5))
+        scores["recall@10"].append(recall_at_k(targets, retrieved_targets, 10))
+        scores["mrr"].append(reciprocal_rank(targets, retrieved_targets))
+
+    return {metric: mean(values) for metric, values in scores.items()}
 
 
 def run_eval(
@@ -49,73 +91,27 @@ def run_eval(
     with eval_file.open("r", encoding="utf-8") as f:
         questions = json.load(f)
 
-    modes = ["dense"]
-    if bm25_path.exists():
-        modes.extend(["bm25", "hybrid"])
+    bm25_exists = Path("data/index/bm25.joblib").exists()
+    modes = ["dense", "bm25", "hybrid"] if bm25_exists else ["dense"]
 
-    per_mode_scores: dict[str, dict[str, list[float]]] = {
-        mode: {"Recall@1": [], "Recall@5": [], "Recall@10": [], "MRR": []} for mode in modes
-    }
-    per_query_details: list[dict[str, Any]] = []
+    mode_metrics: dict[str, dict[str, float]] = {}
+    for mode in modes:
+        mode_metrics[mode] = _evaluate_mode(
+            mode=mode,
+            questions=questions,
+            index_path=index_path,
+            metadata_path=metadata_path,
+            openai_api_key=openai_api_key,
+            embed_model=embed_model,
+            k=k,
+            bm25_path=bm25_path,
+        )
 
-    for row in questions:
-        question = row.get("query") or row.get("question")
-        if not question:
-            continue
-
-        query_detail: dict[str, Any] = {"query": question, "modes": {}}
-        for mode in modes:
-            results = retrieve_chunks(
-                question=question,
-                index_path=index_path,
-                metadata_path=metadata_path,
-                openai_api_key=openai_api_key,
-                embed_model=embed_model,
-                top_k=max(10, k),
-                mode=mode,  # type: ignore[arg-type]
-                bm25_path=bm25_path,
-            )
-            targets = _metric_targets(row, results)
-            retrieved_targets = _result_targets(row, results)
-            mode_scores = {
-                "Recall@1": recall_at_k(targets, retrieved_targets, 1),
-                "Recall@5": recall_at_k(targets, retrieved_targets, 5),
-                "Recall@10": recall_at_k(targets, retrieved_targets, 10),
-                "MRR": reciprocal_rank(targets, retrieved_targets),
-            }
-            for metric_name, value in mode_scores.items():
-                per_mode_scores[mode][metric_name].append(value)
-            query_detail["modes"][mode] = {
-                "results": [
-                    {
-                        "doc_id": item.get("doc_id"),
-                        "chunk_id": item.get("chunk_id"),
-                        "citation": item.get("citation"),
-                        "score": item.get("score"),
-                        "retrieval": item.get("retrieval"),
-                    }
-                    for item in results[: max(10, k)]
-                ],
-                "metrics": mode_scores,
-            }
-        per_query_details.append(query_detail)
-
-    mode_metrics = {
-        mode: {metric: mean(values) for metric, values in metrics.items()}
-        for mode, metrics in per_mode_scores.items()
-    }
     table = _format_table(mode_metrics)
 
     results_path.parent.mkdir(parents=True, exist_ok=True)
     with results_path.open("w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "summary": mode_metrics,
-                "per_query": per_query_details,
-            },
-            f,
-            indent=2,
-        )
+        json.dump(mode_metrics, f, indent=2)
 
     LOGGER.info("Wrote evaluation report to %s", results_path)
     return {"table": table, "summary": mode_metrics, "results_path": str(results_path)}

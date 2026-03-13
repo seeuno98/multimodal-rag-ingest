@@ -1,10 +1,14 @@
 [
   {
     "question": "What is retrieval-augmented generation?",
-    "relevant_doc_ids": []
+    "relevant_doc_ids": ["a174f1eb67469491", "2cf34df8cd699313"]
   },
   {
     "question": "How do vector databases help in RAG systems?",
-    "relevant_doc_ids": []
+    "relevant_doc_ids": [
+      "336dcea2724d69ce",
+      "6865eb6913e19767",
+      "b3d803a27a07fa95"
+    ]
   }
 ]

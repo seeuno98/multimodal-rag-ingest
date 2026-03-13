@@ -1,322 +1,154 @@
-# Multimodal RAG Ingest
+﻿# multimodal-rag-ingest
 
-API-first multimodal Retrieval-Augmented Generation (RAG) system that ingests:
+API-first multimodal RAG pipeline that ingests arXiv papers, YouTube talks, and RSS posts into a unified knowledge base for hybrid retrieval and grounded, citation-backed answers.
 
-- arXiv research papers (PDF)
-- YouTube talks (video/audio)
-- RSS blog posts (HTML)
+## Features
 
-and enables unified semantic search + grounded Q&A with citations.
+### Ingestion
+- arXiv ingestion via API + PDF parsing
+- YouTube ingestion via `yt-dlp` captions, with Whisper fallback transcription when captions are unavailable and `OPENAI_API_KEY` is set
+- RSS ingestion via feed parsing + article extraction
+- Deterministic `doc_id` generation from source URI hash
+- Idempotent ingestion with duplicate protection in source JSONL files
 
----
+### Retrieval
+- OpenAI embeddings for dense retrieval
+- FAISS dense vector index
+- BM25 lexical index
+- Hybrid retrieval (Dense FAISS + BM25) with dense fallback when BM25 artifacts are missing
+- Grounded answers generated strictly from retrieved context with validated citations
 
-## ✨ Features
-
-- 📄 arXiv ingestion via API + PDF parsing
-- 🎥 YouTube ingestion via yt-dlp + transcription
-- 📰 RSS blog ingestion via feed parsing + content extraction
-- 🧠 OpenAI embeddings
-- 🔎 FAISS vector index
-- 📚 Grounded Q&A with source citations
-- 📊 Retrieval evaluation (Recall@K, MRR)
-
----
-
-## 🏗 Architecture
-
-Sources
-  ↓
-Ingestion (arXiv / YouTube / RSS)
-  ↓
-Normalization (docs.jsonl)
-  ↓
-Chunking (chunks.jsonl)
-  ↓
-Embeddings (OpenAI)
-  ↓
-FAISS Index
-  ↓
-Retrieval + RAG Answer
-  ↓
-Cited Output
-
----
-
-## 🚀 Setup
-
-### 1. Clone
-
-```bash
-git clone https://github.com/<your-username>/multimodal-rag-ingest.git
-cd multimodal-rag-ingest
-```
-
-### 2. Install dependencies
-
-Using uv:
-
-```bash
-make setup
-```
-
-### 3. Configure environment
-
-```bash
-cp .env.example .env
-```
-
-Add your OpenAI key:
-
-```
-OPENAI_API_KEY=your_key_here
-```
-
-Ensure `ffmpeg` is installed for YouTube/audio processing.
-
----
-
-## 📥 Ingest Data
-
-### arXiv
-
-```bash
-python -m src.cli ingest arxiv --query "retrieval augmented generation" --max 10
-```
-
-### RSS Blogs
-
-Add feeds to `sources/rss_feeds.txt`, then:
-
-```bash
-python -m src.cli ingest rss --feeds sources/rss_feeds.txt
-```
-
-### YouTube
-
-Add video URLs to `sources/youtube_urls.txt`, then:
-
-```bash
-python -m src.cli ingest youtube --urls sources/youtube_urls.txt
-```
-
----
-
-## 🔄 Normalize & Index
-
-```bash
-make normalize
-make index
-```
-
-Artifacts:
-
-- `data/processed/docs.jsonl`
-- `data/processed/chunks.jsonl`
-- `data/index/faiss.index`
-
----
-
-## 🔍 Query
-
-```bash
-make query Q="What is retrieval augmented generation?"
-```
-
-Example output:
-
-```
-Answer:
-RAG combines retrieval with generation by conditioning an LLM on retrieved context.
-
-Sources:
-[arxiv:paper123 p.4]
-[youtube:talk45 00:12:10]
-[rss:blog_post_abc]
-```
-
----
-
-## 📊 Evaluation
-
-Add queries to `eval/questions.json`:
-
-```json
-[
-  {
-    "q": "What is dense retrieval?",
-    "expected_doc_ids": ["doc_123"]
-  }
-]
-```
-
-Run:
-
-```bash
-make eval
-```
-
-Outputs:
-
-- Recall@K
-- MRR
-- Retrieval latency
-
----
-
-## 🧱 Data Schema
-
-### docs.jsonl
-
-Unified document representation across modalities.
-
-### chunks.jsonl
-
-Chunk-level representation used for embedding and indexing.
-
----
-
-## 🔮 Roadmap
-
-- Hybrid search (BM25 + dense)
-- Reranking
-- Personalization layer
-- Slide deck ingestion (.pptx)
-- Web UI with drag-and-drop
-- Faithfulness scoring
-
----
-
-## 📜 License
-
-MIT
-# multimodal-rag-ingest
-
-API-first multimodal RAG pipeline for ingesting arXiv papers, YouTube talks, and RSS blog posts into a unified searchable knowledge base.
+### Evaluation
+- Retrieval evaluation metrics: Recall@K and MRR
 
 ## Architecture
 
 ```text
-                +------------------+
-                |   Source APIs    |
-                |------------------|
-                | arXiv / YouTube  |
-                | RSS + Articles   |
-                +---------+--------+
-                          |
-                          v
-                +------------------+
-                | Ingestion Layer  |
-                |------------------|
-                | arxiv.py         |
-                | youtube.py       |
-                | rss.py           |
-                +---------+--------+
-                          |
-                          v
-                +------------------+
-                | Normalization    |
-                |------------------|
-                | docs.jsonl       |
-                +---------+--------+
-                          |
-                          v
-                +------------------+
-                | Chunk + Embed    |
-                |------------------|
-                | chunks.jsonl      |
-                | OpenAI embeddings |
-                +---------+--------+
-                          |
-                          v
-                +------------------+
-                | FAISS Vector DB  |
-                |------------------|
-                | faiss.index       |
-                | metadata.jsonl    |
-                +---------+--------+
-                          |
-                          v
-                +------------------+
-                | Retrieval + RAG  |
-                |------------------|
-                | grounded answers |
-                | with citations   |
-                +------------------+
+Sources
+  |
+  v
+Ingestion
+  |
+  v
+Normalization (docs.jsonl)
+  |
+  v
+Chunking + Metadata Enrichment (chunks.jsonl)
+  |
+  v
+Embeddings + BM25 Artifacts
+  |
+  v
+Indexes (FAISS / BM25)
+  |
+  v
+Retrieval (Dense / BM25 / Hybrid)
+  |
+  v
+Grounded Answer + Citations
 ```
 
-## Features
+## Quick Start
 
-- Deterministic `doc_id` from URL hash
-- Idempotent ingestion (`*.jsonl` append-only with duplicate protection)
-- Unified multimodal schema (`docs.jsonl`)
-- Semantic chunking with metadata-preserving citations
-- OpenAI embeddings + FAISS retrieval
-- Grounded answer generation with strict citation format
-- Retrieval evaluation with Recall@K and MRR
-
-## Repository Layout
-
-```text
-multimodal-rag-ingest/
-├── README.md
-├── pyproject.toml
-├── .env.example
-├── Makefile
-├── .gitignore
-├── src/
-├── data/
-├── sources/
-└── eval/
-```
-
-## Prerequisites
-
+Prerequisites:
 - Python 3.11+
 - `uv` (recommended) or `pip`
-- `ffmpeg` installed and available on PATH (required for YouTube audio extraction)
-- OpenAI API key
+- `ffmpeg` on `PATH` (required for YouTube audio extraction/transcription fallback)
+- OpenAI API key for embedding/indexing and LLM answering
 
-## Setup
+Setup:
 
 ```bash
+make setup
 cp .env.example .env
-# set OPENAI_API_KEY in .env
-
-# with uv
-uv sync
-
-# alternative
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+# set OPENAI_API_KEY=...
 ```
 
-## CLI Commands
+End-to-end pipeline:
 
 ```bash
-python -m src.cli ingest arxiv --query "retrieval augmented generation" --max 10
+python -m src.cli ingest arxiv --query "retrieval augmented generation" --max 5
 python -m src.cli ingest rss --feeds sources/rss_feeds.txt
 python -m src.cli ingest youtube --urls sources/youtube_urls.txt
 python -m src.cli normalize
 python -m src.cli index
-python -m src.cli query --q "What is RAG?"
-python -m src.cli eval --file eval/questions.json
+python -m src.cli query --q "What is retrieval augmented generation?" --k 5
+python -m src.cli eval --file eval/questions.json --k 5
 ```
 
-## Makefile Shortcuts
+Primary artifacts:
+- `data/processed/docs.jsonl`
+- `data/processed/chunks.jsonl`
+- `data/index/faiss.index`
+- `data/index/metadata.jsonl`
+- `data/index/bm25.joblib`
+
+## CLI Commands
+
+### Ingest
+```bash
+python -m src.cli ingest arxiv --query "retrieval augmented generation" --max 10
+python -m src.cli ingest rss --feeds sources/rss_feeds.txt
+python -m src.cli ingest youtube --urls sources/youtube_urls.txt
+```
+
+### Process and Index
 
 ```bash
-make setup
-make ingest
-make normalize
-make index
-make query Q="What is RAG?"
-make eval
+python -m src.cli normalize
+python -m src.cli index
 ```
 
-Indexing now builds both:
-- FAISS dense index
-- BM25 lexical index
+### Query and Evaluate
+```bash
+python -m src.cli query --q "What is RAG?" --k 5
+python -m src.cli eval --file eval/questions.json --k 5
+```
+
+## Evaluation
+
+Run:
+
+```bash
+python -m src.cli eval --file eval/questions.json --k 5
+```
+
+Outputs:
+- mode-by-mode table for `dense`, `bm25`, and `hybrid` (when BM25 index exists)
+- `Recall@1`, `Recall@5`, `Recall@10`, `MRR`
+- detailed JSON report at `data/eval/results.json`
+
+Example metrics output:
+
+| mode   | Recall@1 | Recall@5 | Recall@10 | MRR  |
+|--------|----------|----------|-----------|------|
+| dense  | 0.40     | 0.72     | 0.84      | 0.56 |
+| bm25   | 0.35     | 0.68     | 0.80      | 0.49 |
+| hybrid | 0.46     | 0.79     | 0.88      | 0.61 |
+
+## Testing
+
+1. Unit tests
+```bash
+make test
+```
+
+2. Smoke test
+```bash
+make smoke
+```
+
+3. Full paid smoke test
+```bash
+make smoke_paid
+```
+
+Smoke behavior notes:
+- `make smoke` always runs normalization and validates `data/processed/docs.jsonl`.
+- By default, `make smoke` attempts query (`SMOKE_QUERY=1`) only if `data/index/faiss.index` already exists.
+- Query execution can call OpenAI (embedding for retrieval and chat completion for answers), so smoke may call OpenAI depending on flags and existing artifacts.
+- If index is missing, `make smoke` skips query to avoid costs.
+- `make smoke_paid` forces indexing + query and will incur OpenAI usage.
 
 ## Data Schemas
 
@@ -354,88 +186,65 @@ Indexing now builds both:
   "text": "string",
   "metadata": {
     "source_type": "arxiv_pdf|youtube|rss_blog",
+    "title": "string",
+    "source_uri": "string",
     "citation": "[arxiv:<doc_id> p.<page>] | [youtube:<doc_id> HH:MM:SS] | [rss:<doc_id>]"
   }
 }
 ```
 
-## Grounded Answer Behavior
-
-- Uses retrieved chunks only
-- Includes citations in required format
-- If answer is missing from retrieved context, responds explicitly that it was not found
-- CLI answers display source URLs derived from retrieved chunks, while internal citations are retained for validation
-- Query uses hybrid retrieval by default when `data/index/bm25.joblib` exists, otherwise it falls back to dense retrieval
-
-## Evaluation Format
-
-`eval/questions.json` expects:
+### `eval/questions.json`
 
 ```json
 [
   {
     "question": "What is retrieval augmented generation?",
-    "relevant_doc_ids": ["abc123..."]
+    "relevant_doc_ids": ["abc123def4567890"]
   }
 ]
 ```
 
-The `eval` command prints:
-- `Recall@K`
-- `MRR`
+## Repository Layout
 
-Evaluation compares:
-- dense retrieval
-- bm25 retrieval
-- hybrid retrieval (when BM25 index exists)
-
-Common commands:
-
-```bash
-make index
-python -m src.cli query --q "What is retrieval augmented generation?" --k 5
-python -m src.cli eval --file eval/questions.json
+```text
+multimodal-rag-ingest/
+├── src/
+│   ├── cli.py
+│   ├── ingest/
+│   ├── index/
+│   ├── rag/
+│   └── eval/
+├── data/
+│   ├── raw/
+│   ├── processed/
+│   └── index/
+├── sources/
+│   ├── rss_feeds.txt
+│   └── youtube_urls.txt
+├── eval/
+│   └── questions.json
+├── scripts/
+│   └── smoke_test.py
+├── tests/
+├── Makefile
+└── README.md
 ```
 
-## Notes
+## Roadmap
 
-- YouTube ingestion first attempts captions/subtitles, then falls back to Whisper transcription when API key is available.
-- Network/API failures are logged and skipped without crashing the whole run.
+- Cross-encoder reranking
+- Incremental indexing
+- Faithfulness scoring
+- Web UI
 
-## Testing
+## Why this project
 
-### Run unit tests
+This project explores production-style multimodal retrieval over heterogeneous sources (papers, videos, and blogs). It focuses on:
+- reproducible ingestion and normalization
+- hybrid retrieval with dense and lexical search
+- grounded answers with explicit citations
+- measurable retrieval quality via Recall@K and MRR
 
-```bash
-make test
-```
+## License
 
-This is offline.
-
-### Run end-to-end smoke test
-
-```bash
-make smoke
-```
-
-This runs normalization and artifact checks. If an index already exists, it may also run the query step and print the answer without rebuilding the index.
-
-### Run paid end-to-end smoke test
-
-```bash
-make smoke_paid
-```
-
-This runs the full end-to-end path, including indexing and query generation, and will incur OpenAI usage.
-
-To guarantee no OpenAI calls, disable query execution explicitly:
-
-```bash
-SMOKE_QUERY=0 make smoke
-```
-
-### Clean generated artifacts
-
-```bash
-make clean
-```
+MIT

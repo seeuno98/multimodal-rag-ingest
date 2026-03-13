@@ -91,11 +91,10 @@ def _bm25_retrieve(
     return results
 
 
-def fuse_ranked_results(
+def rrf_fusion(
     dense_results: list[dict[str, Any]],
     bm25_results: list[dict[str, Any]],
-    top_k: int,
-    rrf_k: int = DEFAULT_RRF_K,
+    k: int = DEFAULT_RRF_K,
 ) -> list[dict[str, Any]]:
     fused_scores: dict[str, float] = {}
     merged_meta: dict[str, dict[str, Any]] = {}
@@ -104,13 +103,13 @@ def fuse_ranked_results(
     for result_list, key in ((dense_results, "dense_rank"), (bm25_results, "bm25_rank")):
         for rank, result in enumerate(result_list, start=1):
             chunk_id = str(result["chunk_id"])
-            fused_scores[chunk_id] = fused_scores.get(chunk_id, 0.0) + 1.0 / (rrf_k + rank)
+            fused_scores[chunk_id] = fused_scores.get(chunk_id, 0.0) + 1.0 / (k + rank)
             components.setdefault(chunk_id, {"dense_rank": None, "bm25_rank": None})[key] = rank
             current = merged_meta.get(chunk_id)
             if current is None or result.get("retrieval") == "dense":
                 merged_meta[chunk_id] = result
 
-    ranked_chunk_ids = sorted(fused_scores, key=lambda cid: fused_scores[cid], reverse=True)[:top_k]
+    ranked_chunk_ids = sorted(fused_scores, key=lambda cid: fused_scores[cid], reverse=True)
     fused_results: list[dict[str, Any]] = []
     for output_rank, chunk_id in enumerate(ranked_chunk_ids, start=1):
         result = dict(merged_meta[chunk_id])
@@ -122,13 +121,13 @@ def fuse_ranked_results(
     return fused_results
 
 
-def retrieve_chunks(
+def retrieve(
     question: str,
     index_path: Path,
     metadata_path: Path,
     openai_api_key: str,
     embed_model: str,
-    top_k: int,
+    k: int = 5,
     mode: Literal["dense", "bm25", "hybrid"] | None = None,
     bm25_path: Path | None = None,
 ) -> list[dict[str, Any]]:
@@ -144,12 +143,12 @@ def retrieve_chunks(
             metadata_path=metadata_path,
             openai_api_key=openai_api_key,
             embed_model=embed_model,
-            top_k=top_k,
+            top_k=k,
         )
 
     if resolved_mode == "bm25":
         LOGGER.info("Retrieval mode: bm25")
-        return _bm25_retrieve(question=question, bm25_path=bm25_index_path, top_k=top_k)[:top_k]
+        return _bm25_retrieve(question=question, bm25_path=bm25_index_path, top_k=k)[:k]
 
     dense_candidates = _dense_retrieve(
         question=question,
@@ -157,12 +156,12 @@ def retrieve_chunks(
         metadata_path=metadata_path,
         openai_api_key=openai_api_key,
         embed_model=embed_model,
-        top_k=_candidate_limit(top_k),
+        top_k=_candidate_limit(k),
     )
     bm25_candidates = _bm25_retrieve(
         question=question,
         bm25_path=bm25_index_path,
-        top_k=_candidate_limit(top_k),
+        top_k=_candidate_limit(k),
     )
     LOGGER.info(
         "Retrieval mode: hybrid (dense_candidates=%s, bm25_candidates=%s, rrf_k=%s)",
@@ -170,9 +169,30 @@ def retrieve_chunks(
         len(bm25_candidates),
         DEFAULT_RRF_K,
     )
-    return fuse_ranked_results(
+    return rrf_fusion(
         dense_results=dense_candidates,
         bm25_results=bm25_candidates,
-        top_k=top_k,
-        rrf_k=DEFAULT_RRF_K,
+        k=DEFAULT_RRF_K,
+    )[:k]
+
+
+def retrieve_chunks(
+    question: str,
+    index_path: Path,
+    metadata_path: Path,
+    openai_api_key: str,
+    embed_model: str,
+    top_k: int,
+    mode: Literal["dense", "bm25", "hybrid"] | None = None,
+    bm25_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    return retrieve(
+        question=question,
+        index_path=index_path,
+        metadata_path=metadata_path,
+        openai_api_key=openai_api_key,
+        embed_model=embed_model,
+        k=top_k,
+        mode=mode,
+        bm25_path=bm25_path,
     )
