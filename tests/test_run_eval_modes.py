@@ -121,3 +121,45 @@ def test_run_eval_uses_all_modes_when_bm25_exists(tmp_path, monkeypatch) -> None
     assert "bm25 | 0.0000 | 1.0000 | 1.0000 | 0.5000" in report["table"]
     assert "hybrid | 1.0000 | 1.0000 | 1.0000 | 1.0000" in report["table"]
     assert json.loads(results_path.read_text(encoding="utf-8")) == report["summary"]
+
+
+def test_run_eval_deduplicates_doc_ids_for_metrics(tmp_path, monkeypatch) -> None:
+    eval_file = tmp_path / "questions.json"
+    eval_file.write_text(
+        json.dumps([{"query": "q1", "relevant_doc_ids": ["doc-2"]}]),
+        encoding="utf-8",
+    )
+    index_path = tmp_path / "faiss.index"
+    metadata_path = tmp_path / "metadata.jsonl"
+    results_path = tmp_path / "results.json"
+
+    def fake_retrieve(
+        question: str,
+        index_path: Path,
+        metadata_path: Path,
+        openai_api_key: str,
+        embed_model: str,
+        k: int = 5,
+        mode: str | None = None,
+        bm25_path: Path | None = None,
+    ) -> list[dict[str, str]]:
+        return [
+            {"doc_id": "doc-1", "citation": "[1]"},
+            {"doc_id": "doc-1", "citation": "[1]"},
+            {"doc_id": "doc-2", "citation": "[2]"},
+        ]
+
+    monkeypatch.setattr("src.eval.run_eval.retrieve", fake_retrieve)
+
+    report = run_eval(
+        eval_file=eval_file,
+        index_path=index_path,
+        metadata_path=metadata_path,
+        openai_api_key="test-key",
+        embed_model="test-model",
+        k=5,
+        bm25_path=tmp_path / "missing-bm25.joblib",
+        results_path=results_path,
+    )
+
+    assert report["summary"]["dense"]["mrr"] == 0.5

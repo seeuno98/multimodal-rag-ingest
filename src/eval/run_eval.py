@@ -20,10 +20,23 @@ def _metric_targets(row: dict[str, Any]) -> set[str]:
     return set()
 
 
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
 def _result_targets(row: dict[str, Any], results: list[dict[str, Any]]) -> list[str]:
     if row.get("relevant_citations"):
-        return [str(result.get("citation")) for result in results]
-    return [str(result.get("doc_id")) for result in results]
+        values = [str(result.get("citation")) for result in results]
+    else:
+        values = [str(result.get("doc_id")) for result in results]
+    return _dedupe_preserve_order(values)
 
 
 def _format_table(mode_metrics: dict[str, dict[str, float]]) -> str:

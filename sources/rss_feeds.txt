@@ -1,1 +1,7 @@
 https://lilianweng.github.io/index.xml
+https://huggingface.co/blog/feed.xml
+https://karpathy.github.io/feed.xml
+https://openai.com/news/rss.xml
+https://www.deeplearning.ai/the-batch/feed/
+https://ai.googleblog.com/feeds/posts/default
+https://distill.pub/rss.xml

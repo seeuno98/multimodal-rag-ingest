@@ -4,11 +4,79 @@
     "relevant_doc_ids": ["a174f1eb67469491", "2cf34df8cd699313"]
   },
   {
-    "question": "How do vector databases help in RAG systems?",
-    "relevant_doc_ids": [
-      "336dcea2724d69ce",
-      "6865eb6913e19767",
-      "b3d803a27a07fa95"
-    ]
+    "question": "Why do language models benefit from retrieval?",
+    "relevant_doc_ids": ["a174f1eb67469491", "2cf34df8cd699313"]
+  },
+  {
+    "question": "How can retrieval improve factual accuracy in language models?",
+    "relevant_doc_ids": ["a174f1eb67469491", "2cf34df8cd699313"]
+  },
+  {
+    "question": "What problem does retrieval solve for large language models?",
+    "relevant_doc_ids": ["a174f1eb67469491"]
+  },
+  {
+    "question": "Why is chunking important in retrieval systems?",
+    "relevant_doc_ids": ["a174f1eb67469491", "336dcea2724d69ce"]
+  },
+  {
+    "question": "What role do vector embeddings play in retrieval systems?",
+    "relevant_doc_ids": ["336dcea2724d69ce", "6865eb6913e19767"]
+  },
+  {
+    "question": "What is a vector database used for in a RAG system?",
+    "relevant_doc_ids": ["336dcea2724d69ce"]
+  },
+  {
+    "question": "What are the advantages of semantic search over keyword search?",
+    "relevant_doc_ids": ["336dcea2724d69ce"]
+  },
+  {
+    "question": "How does dense retrieval differ from lexical retrieval?",
+    "relevant_doc_ids": ["336dcea2724d69ce", "2cf34df8cd699313"]
+  },
+  {
+    "question": "Why might hybrid retrieval combine dense search with BM25?",
+    "relevant_doc_ids": ["336dcea2724d69ce", "2cf34df8cd699313"]
+  },
+  {
+    "question": "When might BM25 outperform dense retrieval?",
+    "relevant_doc_ids": ["336dcea2724d69ce"]
+  },
+  {
+    "question": "What is a neural network in simple terms?",
+    "relevant_doc_ids": ["6865eb6913e19767"]
+  },
+  {
+    "question": "How do neurons compute outputs in a neural network?",
+    "relevant_doc_ids": ["6865eb6913e19767"]
+  },
+  {
+    "question": "What is the purpose of weights and biases in a neural network?",
+    "relevant_doc_ids": ["6865eb6913e19767"]
+  },
+  {
+    "question": "Why do activation functions matter in neural networks?",
+    "relevant_doc_ids": ["6865eb6913e19767"]
+  },
+  {
+    "question": "What does backpropagation do during training?",
+    "relevant_doc_ids": ["b3d803a27a07fa95"]
+  },
+  {
+    "question": "Why is backpropagation important for deep learning?",
+    "relevant_doc_ids": ["b3d803a27a07fa95"]
+  },
+  {
+    "question": "How are gradients used to train neural networks?",
+    "relevant_doc_ids": ["b3d803a27a07fa95"]
+  },
+  {
+    "question": "What is gradient descent?",
+    "relevant_doc_ids": ["b3d803a27a07fa95"]
+  },
+  {
+    "question": "What is the purpose of a loss function in machine learning?",
+    "relevant_doc_ids": ["b3d803a27a07fa95"]
   }
 ]
