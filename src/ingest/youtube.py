@@ -37,7 +37,15 @@ def _parse_vtt_to_segments(vtt_path: Path) -> list[dict[str, Any]]:
         return segments
 
     def parse_ts(ts: str) -> float:
-        hh, mm, ss = ts.split(":")
+        clean_ts = ts.strip().split(" ", 1)[0].replace(",", ".")
+        parts = clean_ts.split(":")
+        if len(parts) == 2:
+            hh = "0"
+            mm, ss = parts
+        elif len(parts) == 3:
+            hh, mm, ss = parts
+        else:
+            raise ValueError(f"Unexpected VTT timestamp: {ts}")
         return int(hh) * 3600 + int(mm) * 60 + float(ss)
 
     lines = vtt_path.read_text(encoding="utf-8", errors="ignore").splitlines()

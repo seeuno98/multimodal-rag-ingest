@@ -1,6 +1,6 @@
 ﻿# multimodal-rag-ingest
 
-API-first multimodal RAG pipeline that ingests arXiv papers, YouTube talks, and RSS posts into a unified knowledge base for hybrid retrieval and grounded, citation-backed answers.
+API-first multimodal retrieval-augmented generation (RAG) system that ingests arXiv papers, YouTube talks, and RSS posts into a unified knowledge base supporting dense, lexical, and hybrid retrieval with grounded citation-backed answers.
 
 ## Features
 
@@ -15,13 +15,26 @@ API-first multimodal RAG pipeline that ingests arXiv papers, YouTube talks, and 
 - OpenAI embeddings for dense retrieval
 - FAISS dense vector index
 - BM25 lexical index
-- Hybrid retrieval (Dense FAISS + BM25) with dense fallback when BM25 artifacts are missing
+- Hybrid retrieval (FAISS + BM25) using Reciprocal Rank Fusion (RRF)
+- Automatic dense-only fallback when BM25 artifacts are missing
 - Grounded answers generated strictly from retrieved context with validated citations
 
 ### Evaluation
-- Retrieval evaluation metrics: Recall@K and MRR
+- Multi-mode retrieval evaluation for `dense`, `bm25`, and `hybrid`
+- Retrieval evaluation metrics: `Recall@1`, `Recall@5`, `Recall@10`, and `MRR`
+- Evaluation scored over unique document IDs to avoid duplicate chunk hits distorting results
+
+## System Capabilities
+
+- Multimodal ingestion: arXiv PDFs, RSS/blog content, and YouTube transcripts
+- Production-style indexing pipeline with FAISS dense vectors and BM25 lexical search
+- Hybrid retrieval using Reciprocal Rank Fusion (RRF)
+- Grounded answer generation with validated citations
+- Retrieval benchmarking using Recall@K and Mean Reciprocal Rank (MRR)
 
 ## Architecture
+
+The system follows a staged ingestion → normalization → indexing → retrieval pipeline.
 
 ```text
 Sources
@@ -42,11 +55,23 @@ Embeddings + BM25 Artifacts
 Indexes (FAISS / BM25)
   |
   v
-Retrieval (Dense / BM25 / Hybrid)
+Retrieval (Dense / BM25 / Hybrid RRF)
   |
   v
 Grounded Answer + Citations
 ```
+
+## Pipeline Overview
+
+- `ingest`: collect raw arXiv, RSS/blog, and YouTube sources into source-specific JSONL files
+- `normalize`: standardize raw records into a unified `docs.jsonl` schema
+- `index`: chunk documents, compute embeddings, build the FAISS index, and build BM25 artifacts
+- `query`: retrieve relevant chunks and generate a grounded answer with citations
+- `eval`: benchmark retrieval quality by mode and write a structured report to `data/eval/results.json`
+
+Current indexed corpus:
+- `812` documents
+- `38,089` chunks
 
 ## Quick Start
 
@@ -117,14 +142,29 @@ Outputs:
 - mode-by-mode table for `dense`, `bm25`, and `hybrid` (when BM25 index exists)
 - `Recall@1`, `Recall@5`, `Recall@10`, `MRR`
 - detailed JSON report at `data/eval/results.json`
+- evaluation over unique document IDs so repeated chunk hits from the same document do not inflate metrics
 
-Example metrics output:
+Retrieval modes:
+- `dense`: FAISS vector search over OpenAI embeddings
+- `bm25`: lexical search over the BM25 index
+- `hybrid`: Reciprocal Rank Fusion (RRF) over dense and BM25 rankings
+
+BM25-enabled evaluation runs automatically when `data/index/bm25.joblib` exists. If that artifact is missing, `eval` falls back to `dense` mode only.
+
+Latest retrieval benchmark results on the current corpus (`812` documents / `38,089` chunks):
 
 | mode   | Recall@1 | Recall@5 | Recall@10 | MRR  |
 |--------|----------|----------|-----------|------|
-| dense  | 0.40     | 0.72     | 0.84      | 0.56 |
-| bm25   | 0.35     | 0.68     | 0.80      | 0.49 |
-| hybrid | 0.46     | 0.79     | 0.88      | 0.61 |
+| dense  | 0.1250   | 0.2750   | 0.2750    | 0.2433 |
+| bm25   | 0.1500   | 0.2500   | 0.2500    | 0.2583 |
+| hybrid | 0.1500   | 0.2500   | 0.2500    | 0.2600 |
+
+
+## Project Summary
+
+- Built a multimodal retrieval pipeline ingesting arXiv papers, RSS/blog posts, and YouTube transcripts into a unified corpus of `812` documents and `38,089` chunks.
+- Implemented dense (FAISS), BM25, and hybrid retrieval using Reciprocal Rank Fusion (RRF) over OpenAI embeddings.
+- Developed an automated retrieval benchmarking framework comparing dense, lexical, and hybrid search using `Recall@1/5/10` and `MRR`.
 
 ## Testing
 
