@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 from pathlib import Path
@@ -121,6 +121,15 @@ def rrf_fusion(
     return fused_results
 
 
+def fuse_ranked_results(
+    dense_results: list[dict[str, Any]],
+    bm25_results: list[dict[str, Any]],
+    top_k: int,
+    rrf_k: int = DEFAULT_RRF_K,
+) -> list[dict[str, Any]]:
+    return rrf_fusion(dense_results=dense_results, bm25_results=bm25_results, k=rrf_k)[:top_k]
+
+
 def retrieve(
     question: str,
     index_path: Path,
@@ -196,3 +205,4 @@ def retrieve_chunks(
         mode=mode,
         bm25_path=bm25_path,
     )
+

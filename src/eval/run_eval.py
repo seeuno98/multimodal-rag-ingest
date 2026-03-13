@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -91,7 +91,7 @@ def run_eval(
     with eval_file.open("r", encoding="utf-8") as f:
         questions = json.load(f)
 
-    bm25_exists = Path("data/index/bm25.joblib").exists()
+    bm25_exists = bm25_path.exists()
     modes = ["dense", "bm25", "hybrid"] if bm25_exists else ["dense"]
 
     mode_metrics: dict[str, dict[str, float]] = {}
@@ -115,3 +115,4 @@ def run_eval(
 
     LOGGER.info("Wrote evaluation report to %s", results_path)
     return {"table": table, "summary": mode_metrics, "results_path": str(results_path)}
+
