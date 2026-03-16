@@ -26,6 +26,7 @@ RETRY_JITTER_MAX_S = 0.25
 RETRY_MS_PATTERN = re.compile(r"Please try again in (\d+)ms", re.IGNORECASE)
 CACHE_PATH = Path("data/index/embeddings_cache.jsonl")
 CACHE_META_PATH = Path("data/index/embeddings_cache_meta.json")
+FAILED_EMBEDDINGS_PATH = Path("data/index/failed_embeddings.jsonl")
 MODEL_DIMENSIONS = {
     "text-embedding-3-small": 1536,
     "text-embedding-3-large": 3072,
@@ -43,7 +44,27 @@ class RetryDecision:
 @dataclass(frozen=True)
 class EmbeddingRequest:
     chunk_id: str | None
+    doc_id: str | None
     text: str
+
+
+@dataclass(frozen=True)
+class EmbeddingFailure:
+    batch_index: int
+    chunk_id: str | None
+    doc_id: str | None
+    text: str
+    error: str
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "batch_index": self.batch_index,
+            "chunk_id": self.chunk_id,
+            "doc_id": self.doc_id,
+            "text_length": len(self.text),
+            "text_preview": self.text[:200],
+            "error": self.error,
+        }
 
 
 def parse_retry_ms(message: str) -> int | None:
@@ -207,11 +228,12 @@ class Embedder:
                 requests.append(
                     EmbeddingRequest(
                         chunk_id=item.get("chunk_id"),
+                        doc_id=item.get("doc_id"),
                         text=str(item.get("text", "")),
                     )
                 )
             else:
-                requests.append(EmbeddingRequest(chunk_id=None, text=str(item)))
+                requests.append(EmbeddingRequest(chunk_id=None, doc_id=None, text=str(item)))
         return requests
 
     def _embed_batch(self, batch: list[str], batch_index: int) -> list[list[float]]:
@@ -242,8 +264,76 @@ class Embedder:
 
         raise RuntimeError(f"Embedding batch {batch_index} exhausted retry loop unexpectedly.")
 
+    def _embed_batch_with_fallback(
+        self,
+        batch: list[tuple[int, EmbeddingRequest]],
+        batch_index: int,
+        allow_single_failure: bool = False,
+    ) -> tuple[list[tuple[int, list[float]]], list[EmbeddingFailure]]:
+        batch_texts = [request.text for _, request in batch]
+        try:
+            vectors = self._embed_batch(batch_texts, batch_index=batch_index)
+            return list(zip((idx for idx, _ in batch), vectors)), []
+        except RuntimeError as exc:
+            if len(batch) == 1:
+                _, request = batch[0]
+                error = str(exc)
+                LOGGER.error(
+                    "Embedding permanently failed batch=%s chunk_id=%s doc_id=%s text_length=%s text_preview=%r error=%s",
+                    batch_index,
+                    request.chunk_id,
+                    request.doc_id,
+                    len(request.text),
+                    request.text[:200],
+                    error,
+                )
+                if allow_single_failure:
+                    return [], [
+                        EmbeddingFailure(
+                            batch_index=batch_index,
+                            chunk_id=request.chunk_id,
+                            doc_id=request.doc_id,
+                            text=request.text,
+                            error=error,
+                        )
+                    ]
+                raise
+
+            midpoint = len(batch) // 2
+            LOGGER.warning(
+                "Embedding batch fallback split batch=%s size=%s left=%s right=%s error=%s",
+                batch_index,
+                len(batch),
+                midpoint,
+                len(batch) - midpoint,
+                exc,
+            )
+            left_vectors, left_failures = self._embed_batch_with_fallback(
+                batch[:midpoint],
+                batch_index=batch_index * 2,
+                allow_single_failure=allow_single_failure,
+            )
+            right_vectors, right_failures = self._embed_batch_with_fallback(
+                batch[midpoint:],
+                batch_index=batch_index * 2 + 1,
+                allow_single_failure=allow_single_failure,
+            )
+            return left_vectors + right_vectors, left_failures + right_failures
+
     def embed_texts(self, texts: Sequence[dict[str, Any] | str]) -> np.ndarray:
         return self._embed_texts(texts, context="index")
+
+    def embed_texts_with_failures(
+        self,
+        texts: Sequence[dict[str, Any]],
+    ) -> tuple[np.ndarray, list[dict[str, Any]], list[EmbeddingFailure]]:
+        vectors, successful_indices, failures = self._embed_texts(
+            texts,
+            context="index",
+            allow_partial_failures=True,
+        )
+        successful_rows = [texts[idx] for idx in successful_indices]
+        return vectors, successful_rows, failures
 
     def embed_query_texts(self, texts: Sequence[str]) -> np.ndarray:
         return self._embed_texts(texts, context="query")
@@ -252,9 +342,13 @@ class Embedder:
         self,
         texts: Sequence[dict[str, Any] | str],
         context: Literal["index", "query"] = "index",
-    ) -> np.ndarray:
+        allow_partial_failures: bool = False,
+    ) -> tuple[np.ndarray, list[int], list[EmbeddingFailure]] | np.ndarray:
         if not texts:
-            return np.empty((0, 0), dtype=np.float32)
+            empty = np.empty((0, 0), dtype=np.float32)
+            if allow_partial_failures:
+                return empty, [], []
+            return empty
 
         requests = self._normalize_requests(texts)
         use_cache = context == "index" and all(request.chunk_id for request in requests)
@@ -263,6 +357,7 @@ class Embedder:
         cache_hits = 0
         cache_misses = 0
         new_cache_items: list[tuple[str, list[float]]] = []
+        failures: list[EmbeddingFailure] = []
         self.retry_count = 0
         self.total_batches = 0
 
@@ -283,7 +378,7 @@ class Embedder:
                     write_cache_meta(self.cache_meta_path, self.model, expected_dimension)
 
         ordered_embeddings: list[list[float] | None] = [None] * len(requests)
-        misses: list[tuple[int, str, str]] = []
+        misses: list[tuple[int, EmbeddingRequest]] = []
         for idx, request in enumerate(requests):
             if use_cache and request.chunk_id and request.chunk_id in cache:
                 ordered_embeddings[idx] = cache[request.chunk_id]
@@ -291,28 +386,34 @@ class Embedder:
             else:
                 if use_cache:
                     cache_misses += 1
-                misses.append((idx, request.chunk_id or "", request.text))
+                misses.append((idx, request))
 
         for batch_number, start in enumerate(range(0, len(misses), self.batch_size), start=1):
             batch = misses[start : start + self.batch_size]
-            batch_texts = [text for _, _, text in batch]
-            batch_vectors = self._embed_batch(batch_texts, batch_index=batch_number)
+            batch_vectors, batch_failures = self._embed_batch_with_fallback(
+                batch,
+                batch_index=batch_number,
+                allow_single_failure=allow_partial_failures,
+            )
+            failures.extend(batch_failures)
             if expected_dimension is None and batch_vectors:
-                expected_dimension = len(batch_vectors[0])
+                expected_dimension = len(batch_vectors[0][1])
                 write_cache_meta(self.cache_meta_path, self.model, expected_dimension)
-            for (idx, chunk_id, _), embedding in zip(batch, batch_vectors):
+            for idx, embedding in batch_vectors:
                 ordered_embeddings[idx] = embedding
-                if use_cache and chunk_id:
-                    new_cache_items.append((chunk_id, embedding))
+                request = requests[idx]
+                if use_cache and request.chunk_id:
+                    new_cache_items.append((request.chunk_id, embedding))
 
         if use_cache and new_cache_items:
             append_embeddings_to_cache(self.cache_path, new_cache_items)
 
-        final_vectors = [embedding for embedding in ordered_embeddings if embedding is not None]
+        successful_indices = [idx for idx, embedding in enumerate(ordered_embeddings) if embedding is not None]
+        final_vectors = [ordered_embeddings[idx] for idx in successful_indices]
         if context == "index":
             LOGGER.info(
                 "Index embedding cache summary: total_chunks=%s cache_hits=%s cache_misses=%s "
-                "new_embeddings_written=%s batches=%s retries=%s batch_size=%s",
+                "new_embeddings_written=%s batches=%s retries=%s batch_size=%s failures=%s",
                 len(requests),
                 cache_hits,
                 cache_misses,
@@ -320,6 +421,7 @@ class Embedder:
                 self.total_batches,
                 self.retry_count,
                 self.batch_size,
+                len(failures),
             )
         else:
             LOGGER.info(
@@ -329,4 +431,7 @@ class Embedder:
                 self.retry_count,
                 self.model,
             )
-        return np.asarray(final_vectors, dtype=np.float32)
+        vectors = np.asarray(final_vectors, dtype=np.float32)
+        if allow_partial_failures:
+            return vectors, successful_indices, failures
+        return vectors

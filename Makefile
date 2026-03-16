@@ -1,6 +1,6 @@
 PYTHON ?= .venv/bin/python
 
-.PHONY: setup ingest normalize index query eval test smoke smoke_paid smoke_answer smoke_offline clean clean_all
+.PHONY: setup ingest normalize index query eval api bench_api test smoke smoke_paid smoke_answer smoke_offline clean clean_all
 
 setup:
 	@if command -v uv >/dev/null 2>&1; then \
@@ -25,6 +25,13 @@ query:
 
 eval:
 	$(PYTHON) -m src.cli eval --file eval/questions.json
+
+api:
+	$(PYTHON) -m uvicorn src.api.app:app --reload --port 8000
+
+
+bench_api:
+	$(PYTHON) scripts/benchmark_api.py --url http://127.0.0.1:8000/retrieve --query "What is retrieval augmented generation?"
 
 test:
 	$(PYTHON) -m pytest -q

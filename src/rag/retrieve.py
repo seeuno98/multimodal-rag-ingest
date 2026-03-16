@@ -1,10 +1,12 @@
 ﻿from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
+from rank_bm25 import BM25Okapi
 
 from src.index.bm25 import load_bm25_index, tokenize
 from src.index.embed import Embedder
@@ -14,6 +16,15 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_RRF_K = 60
 DEFAULT_CANDIDATE_MULTIPLIER = 5
 DEFAULT_MIN_CANDIDATES = 50
+
+
+@dataclass
+class RetrievalResources:
+    embedder: Embedder | None = None
+    faiss_store: FaissStore | None = None
+    bm25: BM25Okapi | None = None
+    bm25_chunk_ids: list[str] | None = None
+    bm25_chunk_meta: dict[str, dict[str, Any]] | None = None
 
 
 def select_retrieval_mode(
@@ -43,12 +54,17 @@ def _dense_retrieve(
     openai_api_key: str,
     embed_model: str,
     top_k: int,
+    resources: RetrievalResources | None = None,
 ) -> list[dict[str, Any]]:
-    if not openai_api_key:
+    embedder = resources.embedder if resources is not None else None
+    if embedder is None and not openai_api_key:
         raise ValueError("OPENAI_API_KEY is required for dense retrieval.")
-    embedder = Embedder(api_key=openai_api_key, model=embed_model)
+    if embedder is None:
+        embedder = Embedder(api_key=openai_api_key, model=embed_model)
     q_vec = embedder.embed_query_texts([question])[0]
-    store = FaissStore.load(index_path=index_path, metadata_path=metadata_path)
+    store = resources.faiss_store if resources is not None else None
+    if store is None:
+        store = FaissStore.load(index_path=index_path, metadata_path=metadata_path)
     hits = store.search(query_vector=q_vec, top_k=top_k)
     for rank, hit in enumerate(hits, start=1):
         metadata = hit.get("metadata", {})
@@ -64,8 +80,19 @@ def _bm25_retrieve(
     question: str,
     bm25_path: Path,
     top_k: int,
+    resources: RetrievalResources | None = None,
 ) -> list[dict[str, Any]]:
-    bm25, chunk_ids, chunk_meta = load_bm25_index(bm25_path)
+    if (
+        resources is not None
+        and resources.bm25 is not None
+        and resources.bm25_chunk_ids is not None
+        and resources.bm25_chunk_meta is not None
+    ):
+        bm25 = resources.bm25
+        chunk_ids = resources.bm25_chunk_ids
+        chunk_meta = resources.bm25_chunk_meta
+    else:
+        bm25, chunk_ids, chunk_meta = load_bm25_index(bm25_path)
     scores = np.asarray(bm25.get_scores(tokenize(question)), dtype=float)
     limit = min(len(scores), _candidate_limit(top_k))
     if limit == 0:
@@ -139,6 +166,7 @@ def retrieve(
     k: int = 5,
     mode: Literal["dense", "bm25", "hybrid"] | None = None,
     bm25_path: Path | None = None,
+    resources: RetrievalResources | None = None,
 ) -> list[dict[str, Any]]:
     bm25_index_path = bm25_path or index_path.with_name("bm25.joblib")
     resolved_mode = select_retrieval_mode(index_path, metadata_path, bm25_index_path, requested_mode=mode)
@@ -153,11 +181,17 @@ def retrieve(
             openai_api_key=openai_api_key,
             embed_model=embed_model,
             top_k=k,
+            resources=resources,
         )
 
     if resolved_mode == "bm25":
         LOGGER.info("Retrieval mode: bm25")
-        return _bm25_retrieve(question=question, bm25_path=bm25_index_path, top_k=k)[:k]
+        return _bm25_retrieve(
+            question=question,
+            bm25_path=bm25_index_path,
+            top_k=k,
+            resources=resources,
+        )[:k]
 
     dense_candidates = _dense_retrieve(
         question=question,
@@ -166,11 +200,13 @@ def retrieve(
         openai_api_key=openai_api_key,
         embed_model=embed_model,
         top_k=_candidate_limit(k),
+        resources=resources,
     )
     bm25_candidates = _bm25_retrieve(
         question=question,
         bm25_path=bm25_index_path,
         top_k=_candidate_limit(k),
+        resources=resources,
     )
     LOGGER.info(
         "Retrieval mode: hybrid (dense_candidates=%s, bm25_candidates=%s, rrf_k=%s)",
@@ -194,6 +230,7 @@ def retrieve_chunks(
     top_k: int,
     mode: Literal["dense", "bm25", "hybrid"] | None = None,
     bm25_path: Path | None = None,
+    resources: RetrievalResources | None = None,
 ) -> list[dict[str, Any]]:
     return retrieve(
         question=question,
@@ -204,5 +241,6 @@ def retrieve_chunks(
         k=top_k,
         mode=mode,
         bm25_path=bm25_path,
+        resources=resources,
     )
 

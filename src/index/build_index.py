@@ -6,7 +6,7 @@ from typing import Any
 
 from src.index.bm25 import build_bm25_index
 from src.index.chunk import chunk_documents
-from src.index.embed import Embedder
+from src.index.embed import FAILED_EMBEDDINGS_PATH, Embedder
 from src.index.faiss_store import FaissStore
 from src.ingest.normalize import read_jsonl, write_jsonl
 
@@ -33,11 +33,22 @@ def build_index(
         raise ValueError("OPENAI_API_KEY is required for embedding and indexing.")
 
     embedder = Embedder(api_key=openai_api_key, model=embed_model)
-    vectors = embedder.embed_texts(chunks)
+    vectors, successful_chunks, failed_chunks = embedder.embed_texts_with_failures(chunks)
+    failed_embeddings_path = faiss_path.with_name(FAILED_EMBEDDINGS_PATH.name)
+    write_jsonl(failed_embeddings_path, [failure.to_json() for failure in failed_chunks])
+    if not successful_chunks:
+        raise ValueError("All chunk embeddings failed; no index artifacts were produced.")
     store = FaissStore(dim=vectors.shape[1])
-    store.add(vectors=vectors, metadata=chunks)
+    store.add(vectors=vectors, metadata=successful_chunks)
     store.save(index_path=faiss_path, metadata_path=metadata_path)
-    build_bm25_index(chunks=chunks, out_path=bm25_path)
-    LOGGER.info("Built BM25 index: chunks=%s path=%s", len(chunks), bm25_path)
-    LOGGER.info("Indexed %s chunks from %s documents", len(chunks), len(docs))
-    return len(docs), len(chunks)
+    build_bm25_index(chunks=successful_chunks, out_path=bm25_path)
+    LOGGER.info("Built BM25 index: chunks=%s path=%s", len(successful_chunks), bm25_path)
+    LOGGER.info(
+        "Indexed chunks attempted=%s embedded=%s failed=%s documents=%s failed_log=%s",
+        len(chunks),
+        len(successful_chunks),
+        len(failed_chunks),
+        len(docs),
+        failed_embeddings_path,
+    )
+    return len(docs), len(successful_chunks)
