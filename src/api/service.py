@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -11,7 +12,7 @@ from src.index.embed import Embedder
 from src.index.faiss_store import FaissStore
 from src.rag.answer import generate_grounded_answer
 from src.rag.citations import build_citation_url_map
-from src.rag.retrieve import RetrievalResources, retrieve_chunks
+from src.rag.retrieve import RetrievalResources, RetrievalTimings, retrieve_chunks, retrieve_chunks_with_timings
 
 LOGGER = logging.getLogger(__name__)
 RETRIEVAL_MODES = ("dense", "bm25", "hybrid")
@@ -50,16 +51,19 @@ class RetrievalService:
         self._load_resources()
 
     def _load_resources(self) -> None:
+        started = time.perf_counter()
         if self.index_path.exists() and self.metadata_path.exists():
+            faiss_started = time.perf_counter()
             self.resources.faiss_store = FaissStore.load(
                 index_path=self.index_path,
                 metadata_path=self.metadata_path,
             )
             LOGGER.info(
-                "Loaded FAISS store index_path=%s metadata_path=%s items=%s",
+                "Loaded FAISS store index_path=%s metadata_path=%s items=%s load_ms=%.2f",
                 self.index_path,
                 self.metadata_path,
                 len(self.resources.faiss_store.metadata),
+                (time.perf_counter() - faiss_started) * 1000,
             )
 
         if self.cfg.openai_api_key:
@@ -70,15 +74,18 @@ class RetrievalService:
             LOGGER.info("Initialized embedder model=%s", self.cfg.openai_embed_model)
 
         if self.bm25_path.exists():
+            bm25_started = time.perf_counter()
             bm25, chunk_ids, chunk_meta = load_bm25_index(self.bm25_path)
             self.resources.bm25 = bm25
             self.resources.bm25_chunk_ids = chunk_ids
             self.resources.bm25_chunk_meta = chunk_meta
             LOGGER.info(
-                "Loaded BM25 artifacts path=%s chunks=%s",
+                "Loaded BM25 artifacts path=%s chunks=%s load_ms=%.2f",
                 self.bm25_path,
                 len(chunk_ids),
+                (time.perf_counter() - bm25_started) * 1000,
             )
+        LOGGER.info("Retrieval resources ready total_load_ms=%.2f", (time.perf_counter() - started) * 1000)
 
     def status(self) -> dict[str, Any]:
         return {
@@ -123,6 +130,40 @@ class RetrievalService:
             resources=self.resources,
         )
 
+    def retrieve_with_timings(
+        self,
+        query: str,
+        k: int = 5,
+        mode: Literal["dense", "bm25", "hybrid"] = "dense",
+    ) -> tuple[list[dict[str, Any]], RetrievalTimings]:
+        self._validate_mode(mode)
+        results, timings = retrieve_chunks_with_timings(
+            question=query,
+            index_path=self.index_path,
+            metadata_path=self.metadata_path,
+            openai_api_key=self.cfg.openai_api_key,
+            embed_model=self.cfg.openai_embed_model,
+            top_k=k,
+            mode=mode,
+            bm25_path=self.bm25_path,
+            resources=self.resources,
+        )
+        LOGGER.info(
+            (
+                "retrieve_breakdown mode=%s k=%s query_chars=%s total_ms=%.2f "
+                "embedding_ms=%.2f dense_ms=%.2f bm25_ms=%.2f fusion_ms=%.2f"
+            ),
+            mode,
+            k,
+            len(query),
+            timings.total_ms,
+            timings.embedding_ms,
+            timings.dense_retrieval_ms,
+            timings.bm25_retrieval_ms,
+            timings.fusion_ms,
+        )
+        return results, timings
+
     def answer(
         self,
         query: str,
@@ -164,4 +205,3 @@ def format_retrieval_result(result: dict[str, Any]) -> dict[str, Any]:
         "snippet": _make_snippet(text),
         "components": result.get("components"),
     }
-

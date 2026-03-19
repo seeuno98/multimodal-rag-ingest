@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from src.api.service import RETRIEVAL_MODES, RetrievalService, format_retrieval_result
@@ -94,11 +95,45 @@ def create_app(
     @app.post("/retrieve", response_model=RetrievalResponse)
     async def retrieve(request: RetrievalRequest) -> RetrievalResponse:
         service: RetrievalService = app.state.retrieval_service
+        handler_started = time.perf_counter()
         try:
-            results = service.retrieve(query=request.query, k=request.k, mode=request.mode)
+            if hasattr(service, "retrieve_with_timings"):
+                results, timings = await run_in_threadpool(
+                    service.retrieve_with_timings,
+                    request.query,
+                    request.k,
+                    request.mode,
+                )
+            else:
+                results = await run_in_threadpool(
+                    service.retrieve,
+                    request.query,
+                    request.k,
+                    request.mode,
+                )
+                timings = None
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        serialization_started = time.perf_counter()
         payload = [RetrievalResult(**format_retrieval_result(result)) for result in results]
+        serialization_ms = (time.perf_counter() - serialization_started) * 1000
+        total_handler_ms = (time.perf_counter() - handler_started) * 1000
+        if timings is not None:
+            LOGGER.info(
+                (
+                    "retrieve_request mode=%s k=%s total_handler_ms=%.2f total_retrieval_ms=%.2f "
+                    "embedding_ms=%.2f dense_ms=%.2f bm25_ms=%.2f fusion_ms=%.2f serialization_ms=%.2f"
+                ),
+                request.mode,
+                request.k,
+                total_handler_ms,
+                timings.total_ms,
+                timings.embedding_ms,
+                timings.dense_retrieval_ms,
+                timings.bm25_retrieval_ms,
+                timings.fusion_ms,
+                serialization_ms,
+            )
         return RetrievalResponse(
             query=request.query,
             mode=request.mode,
@@ -110,7 +145,12 @@ def create_app(
     async def answer(request: RetrievalRequest) -> AnswerResponse:
         service: RetrievalService = app.state.retrieval_service
         try:
-            response = service.answer(query=request.query, k=request.k, mode=request.mode)
+            response = await run_in_threadpool(
+                service.answer,
+                request.query,
+                request.k,
+                request.mode,
+            )
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         payload = [RetrievalResult(**format_retrieval_result(result)) for result in response["results"]]

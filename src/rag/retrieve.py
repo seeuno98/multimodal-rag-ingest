@@ -1,6 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -16,6 +17,15 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_RRF_K = 60
 DEFAULT_CANDIDATE_MULTIPLIER = 5
 DEFAULT_MIN_CANDIDATES = 50
+
+
+@dataclass
+class RetrievalTimings:
+    total_ms: float = 0.0
+    embedding_ms: float = 0.0
+    dense_retrieval_ms: float = 0.0
+    bm25_retrieval_ms: float = 0.0
+    fusion_ms: float = 0.0
 
 
 @dataclass
@@ -55,17 +65,24 @@ def _dense_retrieve(
     embed_model: str,
     top_k: int,
     resources: RetrievalResources | None = None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], float, float]:
     embedder = resources.embedder if resources is not None else None
     if embedder is None and not openai_api_key:
         raise ValueError("OPENAI_API_KEY is required for dense retrieval.")
     if embedder is None:
         embedder = Embedder(api_key=openai_api_key, model=embed_model)
+
+    embedding_started = time.perf_counter()
     q_vec = embedder.embed_query_texts([question])[0]
+    embedding_ms = (time.perf_counter() - embedding_started) * 1000
+
     store = resources.faiss_store if resources is not None else None
     if store is None:
         store = FaissStore.load(index_path=index_path, metadata_path=metadata_path)
+
+    search_started = time.perf_counter()
     hits = store.search(query_vector=q_vec, top_k=top_k)
+    dense_retrieval_ms = (time.perf_counter() - search_started) * 1000
     for rank, hit in enumerate(hits, start=1):
         metadata = hit.get("metadata", {})
         hit["rank"] = rank
@@ -73,7 +90,7 @@ def _dense_retrieve(
         hit["citation"] = hit.get("citation") or metadata.get("citation")
         hit["source_uri"] = hit.get("source_uri") or metadata.get("source_uri")
         hit["retrieval"] = "dense"
-    return hits
+    return hits, embedding_ms, dense_retrieval_ms
 
 
 def _bm25_retrieve(
@@ -81,7 +98,8 @@ def _bm25_retrieve(
     bm25_path: Path,
     top_k: int,
     resources: RetrievalResources | None = None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], float]:
+    started = time.perf_counter()
     if (
         resources is not None
         and resources.bm25 is not None
@@ -96,7 +114,7 @@ def _bm25_retrieve(
     scores = np.asarray(bm25.get_scores(tokenize(question)), dtype=float)
     limit = min(len(scores), _candidate_limit(top_k))
     if limit == 0:
-        return []
+        return [], (time.perf_counter() - started) * 1000
     ranked_indices = np.argsort(scores)[::-1][:limit]
 
     results: list[dict[str, Any]] = []
@@ -115,7 +133,7 @@ def _bm25_retrieve(
                 "retrieval": "bm25",
             }
         )
-    return results
+    return results, (time.perf_counter() - started) * 1000
 
 
 def rrf_fusion(
@@ -168,13 +186,40 @@ def retrieve(
     bm25_path: Path | None = None,
     resources: RetrievalResources | None = None,
 ) -> list[dict[str, Any]]:
+    results, _ = retrieve_with_timings(
+        question=question,
+        index_path=index_path,
+        metadata_path=metadata_path,
+        openai_api_key=openai_api_key,
+        embed_model=embed_model,
+        k=k,
+        mode=mode,
+        bm25_path=bm25_path,
+        resources=resources,
+    )
+    return results
+
+
+def retrieve_with_timings(
+    question: str,
+    index_path: Path,
+    metadata_path: Path,
+    openai_api_key: str,
+    embed_model: str,
+    k: int = 5,
+    mode: Literal["dense", "bm25", "hybrid"] | None = None,
+    bm25_path: Path | None = None,
+    resources: RetrievalResources | None = None,
+) -> tuple[list[dict[str, Any]], RetrievalTimings]:
     bm25_index_path = bm25_path or index_path.with_name("bm25.joblib")
     resolved_mode = select_retrieval_mode(index_path, metadata_path, bm25_index_path, requested_mode=mode)
+    timings = RetrievalTimings()
+    started = time.perf_counter()
 
     if resolved_mode == "dense":
         if not bm25_index_path.exists():
             LOGGER.info("Retrieval mode: dense (bm25 index missing)")
-        return _dense_retrieve(
+        dense_results, embedding_ms, dense_retrieval_ms = _dense_retrieve(
             question=question,
             index_path=index_path,
             metadata_path=metadata_path,
@@ -183,17 +228,24 @@ def retrieve(
             top_k=k,
             resources=resources,
         )
+        timings.embedding_ms = embedding_ms
+        timings.dense_retrieval_ms = dense_retrieval_ms
+        timings.total_ms = (time.perf_counter() - started) * 1000
+        return dense_results, timings
 
     if resolved_mode == "bm25":
         LOGGER.info("Retrieval mode: bm25")
-        return _bm25_retrieve(
+        bm25_results, bm25_retrieval_ms = _bm25_retrieve(
             question=question,
             bm25_path=bm25_index_path,
             top_k=k,
             resources=resources,
-        )[:k]
+        )
+        timings.bm25_retrieval_ms = bm25_retrieval_ms
+        timings.total_ms = (time.perf_counter() - started) * 1000
+        return bm25_results[:k], timings
 
-    dense_candidates = _dense_retrieve(
+    dense_candidates, embedding_ms, dense_retrieval_ms = _dense_retrieve(
         question=question,
         index_path=index_path,
         metadata_path=metadata_path,
@@ -202,7 +254,7 @@ def retrieve(
         top_k=_candidate_limit(k),
         resources=resources,
     )
-    bm25_candidates = _bm25_retrieve(
+    bm25_candidates, bm25_retrieval_ms = _bm25_retrieve(
         question=question,
         bm25_path=bm25_index_path,
         top_k=_candidate_limit(k),
@@ -214,11 +266,18 @@ def retrieve(
         len(bm25_candidates),
         DEFAULT_RRF_K,
     )
-    return rrf_fusion(
+    fusion_started = time.perf_counter()
+    fused_results = rrf_fusion(
         dense_results=dense_candidates,
         bm25_results=bm25_candidates,
         k=DEFAULT_RRF_K,
     )[:k]
+    timings.embedding_ms = embedding_ms
+    timings.dense_retrieval_ms = dense_retrieval_ms
+    timings.bm25_retrieval_ms = bm25_retrieval_ms
+    timings.fusion_ms = (time.perf_counter() - fusion_started) * 1000
+    timings.total_ms = (time.perf_counter() - started) * 1000
+    return fused_results, timings
 
 
 def retrieve_chunks(
@@ -244,3 +303,26 @@ def retrieve_chunks(
         resources=resources,
     )
 
+
+def retrieve_chunks_with_timings(
+    question: str,
+    index_path: Path,
+    metadata_path: Path,
+    openai_api_key: str,
+    embed_model: str,
+    top_k: int,
+    mode: Literal["dense", "bm25", "hybrid"] | None = None,
+    bm25_path: Path | None = None,
+    resources: RetrievalResources | None = None,
+) -> tuple[list[dict[str, Any]], RetrievalTimings]:
+    return retrieve_with_timings(
+        question=question,
+        index_path=index_path,
+        metadata_path=metadata_path,
+        openai_api_key=openai_api_key,
+        embed_model=embed_model,
+        k=top_k,
+        mode=mode,
+        bm25_path=bm25_path,
+        resources=resources,
+    )

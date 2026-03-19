@@ -241,7 +241,6 @@ class Embedder:
         for attempt in range(1, MAX_ATTEMPTS + 1):
             try:
                 response = self.client.embeddings.create(model=self.model, input=batch)
-                time.sleep(random.uniform(SUCCESS_JITTER_MIN_S, SUCCESS_JITTER_MAX_S))
                 return [item.embedding for item in response.data]
             except Exception as exc:
                 decision = get_retry_decision(exc, attempt=attempt)
@@ -395,6 +394,8 @@ class Embedder:
                 batch_index=batch_number,
                 allow_single_failure=allow_partial_failures,
             )
+            if context == "index" and batch_vectors:
+                time.sleep(random.uniform(SUCCESS_JITTER_MIN_S, SUCCESS_JITTER_MAX_S))
             failures.extend(batch_failures)
             if expected_dimension is None and batch_vectors:
                 expected_dimension = len(batch_vectors[0][1])

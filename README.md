@@ -333,6 +333,35 @@ The benchmark reports:
 - max latency
 - approximate throughput in requests per second
 
+## Load Testing
+
+Run Locust against the retrieval endpoint:
+
+```bash
+locust -f tests/load_test_locust.py --host=http://localhost:8000
+```
+
+Or via Make:
+
+```bash
+make load-test
+```
+
+Open the Locust UI:
+
+```text
+http://localhost:8089
+```
+
+Recommended starting configuration:
+- number of users: `50-200`
+- spawn rate: `5-20`
+
+Record:
+- requests per second (QPS)
+- p50 latency
+- p95 latency
+
 ## Testing
 
 1. Unit tests
