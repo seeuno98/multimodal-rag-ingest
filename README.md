@@ -1,6 +1,12 @@
 ﻿# multimodal-rag-ingest
 
-API-first multimodal retrieval-augmented generation (RAG) system that ingests arXiv papers, YouTube talks, and RSS posts into a unified knowledge base supporting dense, lexical, and hybrid retrieval with grounded citation-backed answers.
+Production-style multimodal retrieval-augmented generation (RAG) system that ingests arXiv papers, YouTube talks, and RSS posts into a unified knowledge base supporting dense, lexical, and hybrid retrieval, grounded citation-backed answers, FastAPI serving, and load/performance analysis.
+
+## Overview
+
+This project builds a production-style multimodal retrieval system that ingests papers, blogs, and videos into a unified index and serves hybrid search via a FastAPI API. It focuses on retrieval quality (Recall@K, MRR), system robustness (failed-chunk isolation), and serving performance under load (Locust-based testing and latency analysis).
+
+**Key result:** Built a hybrid retrieval system over 73K+ chunks with measurable retrieval quality (MRR 0.2167) and characterized serving bottlenecks under load (~40 RPS saturation).
 
 ## Features
 
@@ -31,35 +37,63 @@ API-first multimodal retrieval-augmented generation (RAG) system that ingests ar
 - Hybrid retrieval using Reciprocal Rank Fusion (RRF)
 - Grounded answer generation with validated citations
 - Retrieval benchmarking using Recall@K and Mean Reciprocal Rank (MRR)
+- FastAPI serving with typed request/response models and request timing logs
+- Locust-based load testing for latency/throughput characterization and bottleneck analysis
+- Resilient indexing with failed-chunk isolation during embedding generation
 
 ## Architecture
 
-The system follows a staged ingestion → normalization → indexing → retrieval pipeline.
-
-```text
-Sources
-  |
-  v
-Ingestion
-  |
-  v
-Normalization (docs.jsonl)
-  |
-  v
-Chunking + Metadata Enrichment (chunks.jsonl)
-  |
-  v
-Embeddings + BM25 Artifacts
-  |
-  v
-Indexes (FAISS / BM25)
-  |
-  v
-Retrieval (Dense / BM25 / Hybrid RRF)
-  |
-  v
-Grounded Answer + Citations
+```mermaid
+flowchart LR
+    A[Sources: arXiv / RSS / YouTube] --> B[Ingest]
+    B --> C[Normalize]
+    C --> D[Chunk + Embed]
+    D --> E[FAISS]
+    D --> F[BM25]
+    E --> G[Retrieval]
+    F --> G[Retrieval]
+    G --> H[FastAPI Service]
+    H --> I[CLI / API Clients]
+    H --> J[Load Testing / Locust]
 ```
+
+## Benchmarks and Performance
+
+Current corpus scale:
+- `1,230` documents
+- `73,581` indexed chunks
+
+
+Retrieval benchmark results on the current corpus:
+
+| mode   | Recall@1 | Recall@5 | Recall@10 | MRR  |
+|--------|----------|----------|-----------|------|
+| dense  | 0.1250   | 0.2250   | 0.2500    | 0.1988 |
+| bm25   | 0.1250   | 0.2000   | 0.2000    | 0.1975 |
+| hybrid | 0.1250   | 0.1750   | 0.2250    | 0.2167 |
+
+Metric definitions:
+- `Recall@1`, `Recall@5`, `Recall@10`: fraction of relevant document IDs retrieved within the top-k results
+- `MRR`: mean reciprocal rank of the first relevant retrieved document
+
+Serving and load-test summary:
+- Locust was used to characterize the `/retrieve` endpoint under increasing concurrency rather than to present a peak-throughput success story.
+- In testing, hybrid retrieval throughput plateaued around `~40 RPS`, while latency increased sharply at higher concurrency.
+- The primary value of this benchmark is system observability: it helps identify latency/throughput tradeoffs and where the serving stack starts to saturate.
+
+Note: hybrid retrieval shows higher MRR but slightly lower Recall@5 compared to dense-only in this dataset, likely due to score fusion sensitivity and small evaluation set size.
+
+### Observed bottlenecks:
+- Latency increases sharply beyond ~40 RPS due to synchronous request handling and lack of batching in the retrieval pipeline
+- FAISS + BM25 retrieval runs on CPU without parallel query optimization
+- FastAPI single-node deployment without request batching or async embedding
+
+### Potential improvements:
+- async batching for embedding + retrieval
+- FAISS GPU or IVF/HNSW tuning
+- caching frequent queries
+- horizontal scaling (multiple workers / replicas)
+
 
 ## Pipeline Overview
 
@@ -69,9 +103,6 @@ Grounded Answer + Citations
 - `query`: retrieve relevant chunks and generate a grounded answer with citations
 - `eval`: benchmark retrieval quality by mode and write a structured report to `data/eval/results.json`
 
-Current indexed corpus:
-- `812` documents
-- `38,089` chunks
 
 ## Quick Start
 
@@ -134,6 +165,44 @@ python -m src.cli eval --file eval/questions.json --k 5
 ```bash
 make api
 ```
+
+## Example Queries
+
+- CLI retrieval:
+  ```bash
+  python -m src.cli query --q "What is retrieval augmented generation?" --k 5
+  ```
+  Expect retrieved chunks and a citation-backed answer grounded in the indexed corpus.
+
+- CLI retrieval on retrieval system design:
+  ```bash
+  python -m src.cli query --q "How do vector databases help in RAG systems?" --k 5
+  ```
+  Expect a mix of dense retrieval matches and supporting citations from papers, blogs, or transcripts discussing indexing and retrieval.
+
+- API retrieval:
+  ```bash
+  curl -X POST http://localhost:8000/retrieve \
+    -H "Content-Type: application/json" \
+    -d '{"query":"What is reciprocal rank fusion?","k":5,"mode":"hybrid"}'
+  ```
+  Expect ranked hits with `doc_id`, citation, retrieval mode, and text snippets suitable for debugging search quality.
+
+- API retrieval for lexical vs semantic overlap:
+  ```bash
+  curl -X POST http://localhost:8000/retrieve \
+    -H "Content-Type: application/json" \
+    -d '{"query":"How does BM25 differ from dense retrieval?","k":5,"mode":"bm25"}'
+  ```
+  Expect lexical matches that surface exact-term overlap, useful for comparing BM25 against dense or hybrid retrieval.
+
+- API grounded answer:
+  ```bash
+  curl -X POST http://localhost:8000/answer \
+    -H "Content-Type: application/json" \
+    -d '{"query":"What is retrieval augmented generation?","k":5,"mode":"dense"}'
+  ```
+  Expect a grounded response plus citation metadata derived from the retrieved context.
 
 ## API Testing
 
@@ -265,20 +334,12 @@ Retrieval modes:
 
 BM25-enabled evaluation runs automatically when `data/index/bm25.joblib` exists. If that artifact is missing, `eval` falls back to `dense` mode only.
 
-Latest retrieval benchmark results on the current corpus (`812` documents / `38,089` chunks):
 
-| mode   | Recall@1 | Recall@5 | Recall@10 | MRR  |
-|--------|----------|----------|-----------|------|
-| dense  | 0.1250   | 0.2750   | 0.2750    | 0.2433 |
-| bm25   | 0.1500   | 0.2500   | 0.2500    | 0.2583 |
-| hybrid | 0.1500   | 0.2500   | 0.2500    | 0.2600 |
+## Project Summary
 
-
-## Resume-Ready Project Summary
-
-- Built a multimodal retrieval pipeline ingesting arXiv papers, RSS/blog posts, and YouTube transcripts into a unified corpus of `812` documents and `38,089` chunks.
-- Implemented dense (FAISS), BM25, and hybrid retrieval using Reciprocal Rank Fusion (RRF) over OpenAI embeddings.
-- Developed an automated retrieval benchmarking framework comparing dense, lexical, and hybrid search using `Recall@1/5/10` and `MRR`.
+- Built a multimodal retrieval pipeline ingesting arXiv papers, RSS/blog posts, and YouTube transcripts into a unified corpus of `1,230` documents and `73,581` indexed chunks.
+- Implemented dense (FAISS), BM25, and hybrid retrieval using Reciprocal Rank Fusion (RRF), with retrieval benchmarking across `Recall@1/5/10` and `MRR`.
+- Added a FastAPI retrieval service, Docker packaging, Locust-based load testing, and resilient indexing with failed-chunk isolation for production-style observability.
 
 ## API Service
 
@@ -478,11 +539,11 @@ multimodal-rag-ingest/
 
 ## Why this project
 
-This project explores production-style multimodal retrieval over heterogeneous sources (papers, videos, and blogs). It focuses on:
-- reproducible ingestion and normalization
-- hybrid retrieval with dense and lexical search
-- grounded answers with explicit citations
-- measurable retrieval quality via Recall@K and MRR
+This project demonstrates an end-to-end production-style retrieval system design, focusing on data ingestion, indexing, retrieval quality, and serving performance under realistic workloads. It emphasizes:
+- multimodal ingestion and normalization over papers, blogs, and video transcripts
+- dense, lexical, and hybrid retrieval with explicit benchmark reporting
+- API serving, containerization, and load-test instrumentation
+- operational rigor through request timing, structured outputs, and failed-chunk isolation during indexing
 
 ## License
 
