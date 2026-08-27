@@ -1,45 +1,13 @@
 ﻿# Multi-Source RAG Platform
 
-A production-style retrieval-augmented generation system that ingests arXiv PDFs, RSS/blog content, and YouTube transcripts into a unified knowledge base, supporting dense, sparse, and hybrid retrieval, evaluation, FastAPI serving, and performance testing.
+A production-style multi-source RAG platform that ingests arXiv PDFs, RSS/blog content, and YouTube transcripts into a unified text corpus, supporting dense, sparse, and hybrid retrieval, retrieval evaluation, grounded answer generation, FastAPI serving, and performance testing.
 
-## Overview
+## Key Results
 
-This project builds a production-style multi-source retrieval system that ingests arXiv PDFs, RSS/blog content, and YouTube transcripts, normalizes them into text, and stores them in a unified index for dense, sparse (BM25), and hybrid search through a FastAPI API. It focuses on retrieval quality (Recall@K, MRR), system robustness (failed-chunk isolation), and serving performance under load (Locust-based testing and latency analysis).
-
-**Key result:** Built a hybrid retrieval system over 73K+ chunks with measurable retrieval quality (MRR 0.2167) and characterized serving bottlenecks under load (~40 RPS saturation).
-
-## Features
-
-### Ingestion
-- arXiv ingestion via API + PDF parsing
-- YouTube ingestion via `yt-dlp` captions, with Whisper fallback transcription when captions are unavailable and `OPENAI_API_KEY` is set
-- RSS ingestion via feed parsing + article extraction
-- Deterministic `doc_id` generation from source URI hash
-- Idempotent ingestion with duplicate protection in source JSONL files
-
-### Retrieval
-- OpenAI embeddings for dense retrieval
-- FAISS dense vector index
-- BM25 lexical index
-- Hybrid retrieval (FAISS + BM25) using Reciprocal Rank Fusion (RRF)
-- Automatic dense-only fallback when BM25 artifacts are missing
-- Grounded answers generated strictly from retrieved context with validated citations
-
-### Evaluation
-- Multi-mode retrieval evaluation for `dense`, `bm25`, and `hybrid`
-- Retrieval evaluation metrics: `Recall@1`, `Recall@5`, `Recall@10`, and `MRR`
-- Evaluation scored over unique document IDs to avoid duplicate chunk hits distorting results
-
-## System Capabilities
-
-- Multi-source ingestion: arXiv PDFs, RSS/blog content, and YouTube transcripts
-- Production-style indexing pipeline with FAISS dense vectors and BM25 lexical search
-- Hybrid retrieval using Reciprocal Rank Fusion (RRF)
-- Grounded answer generation with validated citations
-- Retrieval benchmarking using Recall@K and Mean Reciprocal Rank (MRR)
-- FastAPI serving with typed request/response models and request timing logs
-- Locust-based load testing for latency/throughput characterization and bottleneck analysis
-- Resilient indexing with failed-chunk isolation during embedding generation
+- Unified corpus of `1,230` documents and `73,581` indexed chunks
+- Hybrid retrieval MRR of `0.2167`
+- Hybrid retrieval throughput saturation around `~40 RPS` under load
+- Persistent embedding cache reduced indexing time from `~25m 36s` cold to `~31s` warm—a `~98%` reduction
 
 ## Architecture
 
@@ -57,12 +25,35 @@ flowchart LR
     H --> J[Load Testing / Locust]
 ```
 
+## Features
+
+### Ingestion
+
+- Multi-source ingestion for arXiv PDFs, RSS/blog content, and YouTube transcripts
+- arXiv ingestion via API and PDF parsing
+- RSS ingestion via feed parsing and article extraction
+- YouTube ingestion via `yt-dlp` captions, with Whisper fallback transcription when captions are unavailable and `OPENAI_API_KEY` is set
+- Deterministic `doc_id` generation from source URI hashes
+- Idempotent ingestion with duplicate protection in source JSONL files
+
+### Retrieval
+
+- OpenAI embeddings with a FAISS dense vector index
+- Sparse lexical search with BM25
+- Hybrid FAISS + BM25 retrieval using Reciprocal Rank Fusion (RRF)
+- Automatic dense-only fallback when BM25 artifacts are missing
+- Answers generated strictly from retrieved context with validated citations
+
+### Evaluation and Reliability
+
+- Multi-mode evaluation for `dense`, `bm25`, and `hybrid` using `Recall@1`, `Recall@5`, `Recall@10`, and `MRR`
+- Evaluation over unique document IDs so duplicate chunk hits do not distort results
+- Failed-chunk isolation during embedding generation
+- Persistent embedding caching to avoid re-embedding unchanged chunks
+- FastAPI serving with typed request/response models and request timing logs
+- Docker packaging and Locust-based latency, throughput, and bottleneck analysis
+
 ## Benchmarks and Performance
-
-Current corpus scale:
-- `1,230` documents
-- `73,581` indexed chunks
-
 
 Retrieval benchmark results on the current corpus:
 
@@ -73,51 +64,46 @@ Retrieval benchmark results on the current corpus:
 | hybrid | 0.1250   | 0.1750   | 0.2250    | 0.2167 |
 
 Metric definitions:
+
 - `Recall@1`, `Recall@5`, `Recall@10`: fraction of relevant document IDs retrieved within the top-k results
 - `MRR`: mean reciprocal rank of the first relevant retrieved document
 
 Serving and load-test summary:
+
 - Locust was used to characterize the `/retrieve` endpoint under increasing concurrency rather than to present a peak-throughput success story.
 - In testing, hybrid retrieval throughput plateaued around `~40 RPS`, while latency increased sharply at higher concurrency.
 - The primary value of this benchmark is system observability: it helps identify latency/throughput tradeoffs and where the serving stack starts to saturate.
 
 Note: hybrid retrieval shows higher MRR but slightly lower Recall@5 compared to dense-only in this dataset, likely due to score fusion sensitivity and small evaluation set size.
 
-## Efficiency
+### Indexing Efficiency
 
 With persistent embedding caching enabled, repeated indexing avoids re-embedding unchanged chunks.
 
-- Corpus size: ~73K chunks across 1.2K documents  
-- Cold indexing time: ~25m 36s  
-- Warm indexing time: ~31s  
+- Corpus size: ~73K chunks across 1.2K documents
+- Cold indexing time: ~25m 36s
+- Warm indexing time: ~31s
 - Cache hit rate: 100%
 
 This results in a ~98% reduction in indexing time and eliminates redundant embedding API calls.
 
-### Observed bottlenecks:
+### Observed Bottlenecks
+
 - Latency increases sharply beyond ~40 RPS due to synchronous request handling and lack of batching in the retrieval pipeline
 - FAISS + BM25 retrieval runs on CPU without parallel query optimization
 - FastAPI single-node deployment without request batching or async embedding
 
-### Potential improvements:
+### Potential Improvements
+
 - async batching for embedding + retrieval
 - FAISS GPU or IVF/HNSW tuning
 - caching frequent queries
 - horizontal scaling (multiple workers / replicas)
 
-
-## Pipeline Overview
-
-- `ingest`: collect raw arXiv, RSS/blog, and YouTube sources into source-specific JSONL files
-- `normalize`: standardize raw records into a unified `docs.jsonl` schema
-- `index`: chunk documents, compute embeddings, build the FAISS index, and build BM25 artifacts
-- `query`: retrieve relevant chunks and generate a grounded answer with citations
-- `eval`: benchmark retrieval quality by mode and write a structured report to `data/eval/results.json`
-
-
 ## Quick Start
 
 Prerequisites:
+
 - Python 3.11+
 - `uv` (recommended) or `pip`
 - `ffmpeg` on `PATH` (required for YouTube audio extraction/transcription fallback)
@@ -144,6 +130,7 @@ python -m src.cli eval --file eval/questions.json --k 5
 ```
 
 Primary artifacts:
+
 - `data/processed/docs.jsonl`
 - `data/processed/chunks.jsonl`
 - `data/index/faiss.index`
@@ -177,45 +164,54 @@ python -m src.cli eval --file eval/questions.json --k 5
 make api
 ```
 
-## Example Queries
+### Example Queries
 
-- CLI retrieval:
-  ```bash
-  python -m src.cli query --q "What is retrieval augmented generation?" --k 5
-  ```
-  Expect retrieved chunks and a citation-backed answer grounded in the indexed corpus.
+```bash
+python -m src.cli query --q "What is retrieval augmented generation?" --k 5
+python -m src.cli query --q "How do vector databases help in RAG systems?" --k 5
+```
 
-- CLI retrieval on retrieval system design:
-  ```bash
-  python -m src.cli query --q "How do vector databases help in RAG systems?" --k 5
-  ```
-  Expect a mix of dense retrieval matches and supporting citations from papers, blogs, or transcripts discussing indexing and retrieval.
+```bash
+curl -X POST http://localhost:8000/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{"query":"What is reciprocal rank fusion?","k":5,"mode":"hybrid"}'
+```
 
-- API retrieval:
-  ```bash
-  curl -X POST http://localhost:8000/retrieve \
-    -H "Content-Type: application/json" \
-    -d '{"query":"What is reciprocal rank fusion?","k":5,"mode":"hybrid"}'
-  ```
-  Expect ranked hits with `doc_id`, citation, retrieval mode, and text snippets suitable for debugging search quality.
+```bash
+curl -X POST http://localhost:8000/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{"query":"How does BM25 differ from dense retrieval?","k":5,"mode":"bm25"}'
+```
 
-- API retrieval for lexical vs semantic overlap:
-  ```bash
-  curl -X POST http://localhost:8000/retrieve \
-    -H "Content-Type: application/json" \
-    -d '{"query":"How does BM25 differ from dense retrieval?","k":5,"mode":"bm25"}'
-  ```
-  Expect lexical matches that surface exact-term overlap, useful for comparing BM25 against dense or hybrid retrieval.
+```bash
+curl -X POST http://localhost:8000/answer \
+  -H "Content-Type: application/json" \
+  -d '{"query":"What is retrieval augmented generation?","k":5,"mode":"dense"}'
+```
 
-- API grounded answer:
-  ```bash
-  curl -X POST http://localhost:8000/answer \
-    -H "Content-Type: application/json" \
-    -d '{"query":"What is retrieval augmented generation?","k":5,"mode":"dense"}'
-  ```
-  Expect a grounded response plus citation metadata derived from the retrieved context.
+## API Service
 
-## API Testing
+Run locally:
+
+```bash
+make api
+```
+
+The FastAPI app starts on `http://127.0.0.1:8000` and loads retrieval resources at startup when local artifacts are available.
+
+Endpoints:
+
+- `GET /health`: service health plus FAISS/BM25/embedder readiness
+- `POST /retrieve`: return ranked `dense`, `bm25`, or `hybrid` results with document IDs, citations, scores, and text snippets
+- `POST /answer`: return a grounded answer with citations and retrieval metadata
+
+Example request:
+
+```bash
+curl -X POST http://127.0.0.1:8000/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{"query":"What is retrieval augmented generation?","k":5,"mode":"hybrid"}'
+```
 
 ### Health Check
 
@@ -303,11 +299,11 @@ python -m src.cli normalize
 python -m src.cli index
 ```
 
-### Test via Docker
+### Docker
 
 ```bash
-docker build -t multi-source-rag-api .
-docker run --rm -p 8000:8000 --env-file .env multi-source-rag-api
+docker build -t multi-source-rag-platform .
+docker run --rm -p 8000:8000 --env-file .env multi-source-rag-platform
 ```
 
 Then verify:
@@ -333,56 +329,23 @@ python -m src.cli eval --file eval/questions.json --k 5
 ```
 
 Outputs:
+
 - mode-by-mode table for `dense`, `bm25`, and `hybrid` (when BM25 index exists)
 - `Recall@1`, `Recall@5`, `Recall@10`, `MRR`
 - detailed JSON report at `data/eval/results.json`
 - evaluation over unique document IDs so repeated chunk hits from the same document do not inflate metrics
 
 Retrieval modes:
+
 - `dense`: FAISS vector search over OpenAI embeddings
 - `bm25`: lexical search over the BM25 index
 - `hybrid`: Reciprocal Rank Fusion (RRF) over dense and BM25 rankings
 
 BM25-enabled evaluation runs automatically when `data/index/bm25.joblib` exists. If that artifact is missing, `eval` falls back to `dense` mode only.
 
+## Load Testing and Benchmarking
 
-## Project Summary
-
-- Built a multi-source ingestion and retrieval pipeline that normalizes arXiv PDFs, RSS/blog posts, and YouTube transcripts into text, producing a unified corpus of `1,230` documents and `73,581` indexed chunks.
-- Implemented dense (FAISS), BM25, and hybrid retrieval using Reciprocal Rank Fusion (RRF), with retrieval benchmarking across `Recall@1/5/10` and `MRR`.
-- Added a FastAPI retrieval service, Docker packaging, Locust-based load testing, and resilient indexing with failed-chunk isolation for production-style observability.
-
-## API Service
-
-Run locally:
-
-```bash
-make api
-```
-
-The FastAPI app starts on `http://127.0.0.1:8000` and loads retrieval resources at startup when local artifacts are available.
-
-Endpoints:
-- `GET /health`: service health plus FAISS/BM25/embedder readiness
-- `POST /retrieve`: retrieve top-k results for `dense`, `bm25`, or `hybrid`
-- `POST /answer`: run retrieval plus grounded answer generation
-
-Example request:
-
-```bash
-curl -X POST http://127.0.0.1:8000/retrieve \
-  -H "Content-Type: application/json" \
-  -d '{"query":"What is retrieval augmented generation?","k":5,"mode":"hybrid"}'
-```
-
-Run in Docker:
-
-```bash
-docker build -t multi-source-rag-platform .
-docker run --rm -p 8000:8000 --env-file .env multi-source-rag-platform
-```
-
-## Latency Benchmarking
+### Latency Benchmarking
 
 Use the lightweight benchmark script against the retrieval endpoint:
 
@@ -399,13 +362,14 @@ python scripts/benchmark_api.py \
 ```
 
 The benchmark reports:
+
 - average latency
 - p50 latency
 - p95 latency
 - max latency
 - approximate throughput in requests per second
 
-## Load Testing
+### Load Testing
 
 Run Locust against the retrieval endpoint:
 
@@ -426,32 +390,38 @@ http://localhost:8089
 ```
 
 Recommended starting configuration:
+
 - number of users: `50-200`
 - spawn rate: `5-20`
 
 Record:
+
 - requests per second (QPS)
 - p50 latency
 - p95 latency
 
 ## Testing
 
-1. Unit tests
+### Unit Tests
+
 ```bash
 make test
 ```
 
-2. Smoke test
+### Smoke Test
+
 ```bash
 make smoke
 ```
 
-3. Full paid smoke test
+### Full Paid Smoke Test
+
 ```bash
 make smoke_paid
 ```
 
 Smoke behavior notes:
+
 - `make smoke` always runs normalization and validates `data/processed/docs.jsonl`.
 - By default, `make smoke` attempts query (`SMOKE_QUERY=1`) only if `data/index/faiss.index` already exists.
 - Query execution can call OpenAI (embedding for retrieval and chat completion for answers), so smoke may call OpenAI depending on flags and existing artifacts.
@@ -547,14 +517,6 @@ multi-source-rag-platform/
 - Incremental indexing
 - Faithfulness scoring
 - Web UI
-
-## Why this project
-
-This project demonstrates an end-to-end production-style retrieval system design, focusing on data ingestion, indexing, retrieval quality, and serving performance under realistic workloads. It emphasizes:
-- multi-source ingestion and text normalization over arXiv PDFs, RSS/blog content, and YouTube transcripts
-- dense, lexical, and hybrid retrieval with explicit benchmark reporting
-- API serving, containerization, and load-test instrumentation
-- operational rigor through request timing, structured outputs, and failed-chunk isolation during indexing
 
 ## License
 
