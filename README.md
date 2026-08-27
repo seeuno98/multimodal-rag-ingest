@@ -1,10 +1,10 @@
-﻿# multimodal-rag-ingest
+﻿# Multi-Source RAG Platform
 
-Production-style multimodal retrieval-augmented generation (RAG) system that ingests arXiv papers, YouTube talks, and RSS posts into a unified knowledge base supporting dense, lexical, and hybrid retrieval, grounded citation-backed answers, FastAPI serving, and load/performance analysis.
+A production-style retrieval-augmented generation system that ingests arXiv PDFs, RSS/blog content, and YouTube transcripts into a unified knowledge base, supporting dense, sparse, and hybrid retrieval, evaluation, FastAPI serving, and performance testing.
 
 ## Overview
 
-This project builds a production-style multimodal retrieval system that ingests papers, blogs, and videos into a unified index and serves hybrid search via a FastAPI API. It focuses on retrieval quality (Recall@K, MRR), system robustness (failed-chunk isolation), and serving performance under load (Locust-based testing and latency analysis).
+This project builds a production-style multi-source retrieval system that ingests arXiv PDFs, RSS/blog content, and YouTube transcripts, normalizes them into text, and stores them in a unified index for dense, sparse (BM25), and hybrid search through a FastAPI API. It focuses on retrieval quality (Recall@K, MRR), system robustness (failed-chunk isolation), and serving performance under load (Locust-based testing and latency analysis).
 
 **Key result:** Built a hybrid retrieval system over 73K+ chunks with measurable retrieval quality (MRR 0.2167) and characterized serving bottlenecks under load (~40 RPS saturation).
 
@@ -32,7 +32,7 @@ This project builds a production-style multimodal retrieval system that ingests 
 
 ## System Capabilities
 
-- Multimodal ingestion: arXiv PDFs, RSS/blog content, and YouTube transcripts
+- Multi-source ingestion: arXiv PDFs, RSS/blog content, and YouTube transcripts
 - Production-style indexing pipeline with FAISS dense vectors and BM25 lexical search
 - Hybrid retrieval using Reciprocal Rank Fusion (RRF)
 - Grounded answer generation with validated citations
@@ -82,6 +82,17 @@ Serving and load-test summary:
 - The primary value of this benchmark is system observability: it helps identify latency/throughput tradeoffs and where the serving stack starts to saturate.
 
 Note: hybrid retrieval shows higher MRR but slightly lower Recall@5 compared to dense-only in this dataset, likely due to score fusion sensitivity and small evaluation set size.
+
+## Efficiency
+
+With persistent embedding caching enabled, repeated indexing avoids re-embedding unchanged chunks.
+
+- Corpus size: ~73K chunks across 1.2K documents  
+- Cold indexing time: ~25m 36s  
+- Warm indexing time: ~31s  
+- Cache hit rate: 100%
+
+This results in a ~98% reduction in indexing time and eliminates redundant embedding API calls.
 
 ### Observed bottlenecks:
 - Latency increases sharply beyond ~40 RPS due to synchronous request handling and lack of batching in the retrieval pipeline
@@ -295,8 +306,8 @@ python -m src.cli index
 ### Test via Docker
 
 ```bash
-docker build -t multimodal-rag-api .
-docker run --rm -p 8000:8000 --env-file .env multimodal-rag-api
+docker build -t multi-source-rag-api .
+docker run --rm -p 8000:8000 --env-file .env multi-source-rag-api
 ```
 
 Then verify:
@@ -337,7 +348,7 @@ BM25-enabled evaluation runs automatically when `data/index/bm25.joblib` exists.
 
 ## Project Summary
 
-- Built a multimodal retrieval pipeline ingesting arXiv papers, RSS/blog posts, and YouTube transcripts into a unified corpus of `1,230` documents and `73,581` indexed chunks.
+- Built a multi-source ingestion and retrieval pipeline that normalizes arXiv PDFs, RSS/blog posts, and YouTube transcripts into text, producing a unified corpus of `1,230` documents and `73,581` indexed chunks.
 - Implemented dense (FAISS), BM25, and hybrid retrieval using Reciprocal Rank Fusion (RRF), with retrieval benchmarking across `Recall@1/5/10` and `MRR`.
 - Added a FastAPI retrieval service, Docker packaging, Locust-based load testing, and resilient indexing with failed-chunk isolation for production-style observability.
 
@@ -367,8 +378,8 @@ curl -X POST http://127.0.0.1:8000/retrieve \
 Run in Docker:
 
 ```bash
-docker build -t multimodal-rag-ingest .
-docker run --rm -p 8000:8000 --env-file .env multimodal-rag-ingest
+docker build -t multi-source-rag-platform .
+docker run --rm -p 8000:8000 --env-file .env multi-source-rag-platform
 ```
 
 ## Latency Benchmarking
@@ -504,7 +515,7 @@ Smoke behavior notes:
 ## Repository Layout
 
 ```text
-multimodal-rag-ingest/
+multi-source-rag-platform/
 ├── src/
 │   ├── api/
 │   ├── cli.py
@@ -540,7 +551,7 @@ multimodal-rag-ingest/
 ## Why this project
 
 This project demonstrates an end-to-end production-style retrieval system design, focusing on data ingestion, indexing, retrieval quality, and serving performance under realistic workloads. It emphasizes:
-- multimodal ingestion and normalization over papers, blogs, and video transcripts
+- multi-source ingestion and text normalization over arXiv PDFs, RSS/blog content, and YouTube transcripts
 - dense, lexical, and hybrid retrieval with explicit benchmark reporting
 - API serving, containerization, and load-test instrumentation
 - operational rigor through request timing, structured outputs, and failed-chunk isolation during indexing
